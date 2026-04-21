@@ -80,7 +80,12 @@ def load_video(path):
             clip = clip.subclipped(0, video_length_seconds)
 
         if clip.audio is not None:
+            game_dir = Path(__file__).parent.resolve()
+            temp_dir = game_dir / "temp"
+            temp_dir.mkdir(exist_ok=True)
+
             tmp = tempfile.NamedTemporaryFile(
+                dir=temp_dir,
                 suffix=".wav",
                 delete=False
             )
