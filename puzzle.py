@@ -1,17 +1,35 @@
 from utils import *
 from tile import Tile
+from dataclasses import dataclass
 
-def create_puzzle(img):
-    img_width, img_height = img.get_size()
+@dataclass
+class PuzzleData:
+    frames: list
+    durations: list
+    audio_path: str | None
+    tiles: list
+    screen: pygame.Surface
+    button_rect: pygame.Rect
+    tile_w: int
+    tile_h: int
+
+def create_puzzle(frames):
+    img_width, img_height = frames[0].get_size()
     tile_w = img_width // GRID_SIZE
     tile_h = img_height // GRID_SIZE
 
     tiles = []
     for row in range(GRID_SIZE):
         for col in range(GRID_SIZE):
-            rect = pygame.Rect(col * tile_w, row * tile_h, tile_w, tile_h)
-            tile_img = img.subsurface(rect).copy()
-            tiles.append(Tile(tile_img, col, row))
+            rect = pygame.Rect(
+                col * tile_w, 
+                row * tile_h, 
+                tile_w, 
+                tile_h
+            )
+
+            tile_frames = [frame.subsurface(rect)for frame in frames]
+            tiles.append(Tile(tile_frames, col, row))
 
     # Shuffle positions
     positions = [(col, row)
@@ -25,11 +43,22 @@ def create_puzzle(img):
     return tiles, img_width, img_height, tile_w, tile_h
 
 def new_puzzle(image_deck):
-    img = fit_image_to_screen(load_image(image_deck))
-    tiles, width, height, tile_w, tile_h = create_puzzle(img)
+    raw_frames, durations, audio_path = load_media(image_deck)
+
+    frames = fit_image_to_screen(raw_frames)
+    tiles, width, height, tile_w, tile_h = create_puzzle(frames)
     screen = pygame.display.set_mode((width, height))
     button_rect = create_button(width, height)
-    return img, tiles, screen, button_rect, tile_w, tile_h
+
+    return PuzzleData(
+        frames, 
+        durations, 
+        audio_path, 
+        tiles, screen, 
+        button_rect, 
+        tile_w, 
+        tile_h
+    )
 
 def swap_tiles(tile1, tile2):
     old_pos = tile1.current_pos

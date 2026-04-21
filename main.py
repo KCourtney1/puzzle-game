@@ -1,29 +1,55 @@
 from utils import *
-from imageDeck import ImageDeck
-from tile import Tile
 from puzzle import *
+from tile import Tile
+from imageDeck import ImageDeck
 
 def puzzle_is_solved(tiles):
     return all(t.is_correct() for t in tiles)
 
 def main():
     pygame.init()
-    image_deck = ImageDeck()
-    img, tiles, screen, button_rect, tile_w, tile_h = new_puzzle(image_deck)
+    pygame.mixer.init()
     font = pygame.font.SysFont(None, 48)
-
     pygame.display.set_caption("Image Puzzle Game")
+
+    image_deck = ImageDeck()
+    puzzle = new_puzzle(image_deck)
+    if puzzle.audio_path:
+        pygame.mixer.music.load(puzzle.audio_path)
+        pygame.mixer.music.play(-1) # -1 tells Pygame to loop indefinitely
 
     #game loop
     clock = pygame.time.Clock()
     running = True
     puzzle_solved = False
+
     dragged_tile = None
     offset_x = 0
     offset_y = 0
 
+    anim_timer = 0
+    current_frame = 0
+
     while running:
-        clock.tick(FPS)
+        dt = clock.tick(FPS)
+
+        #AUDIO/VIDEO SYNC LOGIC
+        if puzzle.audio_path and pygame.mixer.music.get_busy():
+            # Slave video directly to the background audio thread's timer
+            audio_pos_ms = pygame.mixer.music.get_pos()
+            if audio_pos_ms >= 0:
+                frame_dur = puzzle.durations[0]
+                # Frame index = (Elapsed Time / Time Per Frame) % Total Frames
+                current_frame = int(audio_pos_ms / frame_dur) % len(puzzle.frames)
+        else:
+            # Fallback for GIFs / silent media (Standard dt accumulation)
+            anim_timer += dt
+            current_frame_duration = puzzle.durations[current_frame]
+
+            if anim_timer >= current_frame_duration:
+                anim_timer -= current_frame_duration
+                current_frame = (current_frame + 1) % len(puzzle.frames)
+
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
@@ -31,18 +57,30 @@ def main():
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 if event.button == 1:
                     if puzzle_solved:
-                        if button_rect.collidepoint(event.pos):
-                            img, tiles, screen, button_rect, tile_w, tile_h = new_puzzle(image_deck)
+                        if puzzle.button_rect.collidepoint(event.pos):
+                            cleanup_audio(puzzle.audio_path)
+
+                            puzzle = new_puzzle(image_deck)
                             puzzle_solved = False
+                            current_frame = 0
+                            anim_timer = 0
+
+                            if puzzle.audio_path:
+                                pygame.mixer.music.load(puzzle.audio_path)
+                                pygame.mixer.music.play(-1)
                     else:
-                        for t in reversed(tiles):
+                        for t in reversed(puzzle.tiles):
                             if t.rect.collidepoint(event.pos):
                                 dragged_tile = t
                                 mouse_x, mouse_y = event.pos
                                 offset_x = t.rect.x - mouse_x
                                 offset_y = t.rect.y - mouse_y
 
-                                tiles.append(tiles.pop(tiles.index(t)))
+                                puzzle.tiles.append(
+                                    puzzle.tiles.pop(
+                                        puzzle.tiles.index(t)
+                                    )
+                                )
                                 break
             # Drag
             elif event.type == pygame.MOUSEMOTION:
@@ -60,8 +98,11 @@ def main():
                     drop_row = clamp(row, 0, GRID_SIZE - 1)
 
                     target_tile = next(
-                        (t for t in tiles if t != dragged_tile and t.current_pos == (drop_col, drop_row)), None
+                        (t for t in puzzle.tiles 
+                            if t != dragged_tile and t.current_pos == (drop_col, drop_row)), 
+                        None
                     )
+
                     if target_tile:
                         swap_tiles(dragged_tile, target_tile)
                     else:
@@ -69,20 +110,34 @@ def main():
                         dragged_tile.flash_if_correct()
                     dragged_tile = None
 
-                    if puzzle_is_solved(tiles):
+                    if puzzle_is_solved(puzzle.tiles):
                         puzzle_solved = True
         # Draw
-        screen.fill((0, 0, 0))
-        for t in tiles:
-            t.draw(screen, t == dragged_tile)
+        puzzle.screen.fill((0, 0, 0))
+        for t in puzzle.tiles:
+            t.draw(puzzle.screen,t == dragged_tile,current_frame)
+
         # Win Overlay
         if puzzle_solved:
             #button
-            pygame.draw.rect(screen, (60, 200, 40), button_rect, border_radius=10)
-            pygame.draw.rect(screen, (40, 180, 40), button_rect, 3,border_radius=10)
+            pygame.draw.rect(
+                puzzle.screen, 
+                (60, 200, 40), 
+                puzzle.button_rect,
+                border_radius=10
+            )
+
+            pygame.draw.rect(
+                puzzle.screen,
+                (40, 180, 40),
+                puzzle.button_rect,
+                3,
+                border_radius=10
+            )
+
             text_surf = font.render("Next Puzzle", True, (255, 255, 255))
-            text_rect = text_surf.get_rect(center=button_rect.center)
-            screen.blit(text_surf,text_rect)
+            text_rect = text_surf.get_rect(center = puzzle.button_rect.center)
+            puzzle.screen.blit(text_surf,text_rect)
         pygame.display.flip()
     pygame.quit()
 
