@@ -32,13 +32,18 @@ def load_media(deck):
 
 def load_img(path):
     img = pygame.image.load(path)
+
+    new_w, new_h = get_scaled_size(img.get_width(), img.get_height())
+    if (new_w, new_h) != img.get_size():
+        img = pygame.transform.smoothscale(img, (new_w, new_h))
     return [img], [100], None
 
 def load_gif(path):
     frames = []
     durations = []
-
     pil_img = Image.open(path)
+
+    new_w, new_h = get_scaled_size(pil_img.width, pil_img.height)
     try:
         while True:
             duration = pil_img.info.get("duration", 100)
@@ -49,9 +54,11 @@ def load_gif(path):
                 "RGBA"
             )
 
+            if (new_w, new_h) != pygame_image.get_size():
+                pygame_image = pygame.transform.smoothscale(pygame_image, (new_w, new_h))
+
             frames.append(pygame_image)
             durations.append(duration)
-
             pil_img.seek(pil_img.tell() + 1)
     except EOFError:
         pass
@@ -100,17 +107,21 @@ def load_video(path):
     except Exception as e:
         print(f"Audio extraction failed: {e}")
 
+    orig_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    orig_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    new_w, new_h = get_scaled_size(orig_w, orig_h)
     while True:
         ret, frame = cap.read()
-
         if not ret:
             break #video over
 
+        if (new_w, new_h) != (orig_w, orig_h):
+            frame = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
+
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        height, width, _ = frame_rgb.shape
         pygame_image = pygame.image.frombytes(
             frame_rgb.tobytes(),
-            (width, height),
+            (new_w, new_h),
             "RGB"
         )
         
@@ -127,17 +138,12 @@ def load_video(path):
     
     return frames, durations,audio_path
 
-def fit_image_to_screen(frames):
-    img_width, img_height = frames[0].get_size()
-
-    scale = min(MAX_WINDOW_SIZE / img_width, MAX_WINDOW_SIZE / img_height, 1.0)
-    new_width = int(img_width * scale)
-    new_height = int(img_height * scale)
-
-    return [
-        pygame.transform.smoothscale(frame,(new_width, new_height))
-        for frame in frames
-    ]
+def get_scaled_size(width, height):
+    """Calculates the new dimensions while maintaining aspect ratio."""
+    scale = min(MAX_WINDOW_SIZE / width, MAX_WINDOW_SIZE / height, 1.0)
+    if scale < 1.0:
+        return int(width * scale), int(height * scale)
+    return width, height
 
 def create_button(width, height):
     button_width = 250

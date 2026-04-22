@@ -42,10 +42,9 @@ def create_puzzle(frames):
         tile.move_to(*pos)
     return tiles, img_width, img_height, tile_w, tile_h
 
-def new_puzzle(image_deck):
-    raw_frames, durations, audio_path = load_media(image_deck)
-
-    frames = fit_image_to_screen(raw_frames)
+def new_puzzle(preloaded_media):
+    frames, durations, audio_path = preloaded_media
+    
     tiles, width, height, tile_w, tile_h = create_puzzle(frames)
     screen = pygame.display.set_mode((width, height))
     button_rect = create_button(width, height)

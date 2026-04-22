@@ -2,9 +2,16 @@ from utils import *
 from puzzle import *
 from tile import Tile
 from imageDeck import ImageDeck
+import threading
+import queue
 
 def puzzle_is_solved(tiles):
     return all(t.is_correct() for t in tiles)
+
+def preload_worker(deck, q):
+    """Runs in the background to extract the next media file."""
+    media_data = load_media(deck)
+    q.put(media_data)
 
 def main():
     pygame.init()
@@ -13,10 +20,15 @@ def main():
     pygame.display.set_caption("Image Puzzle Game")
 
     image_deck = ImageDeck()
-    puzzle = new_puzzle(image_deck)
+    first_media = load_media(image_deck)
+    puzzle = new_puzzle(first_media)
+
     if puzzle.audio_path:
         pygame.mixer.music.load(puzzle.audio_path)
         pygame.mixer.music.play(-1) # -1 tells Pygame to loop indefinitely
+
+    preload_queue = queue.Queue()
+    threading.Thread(target=preload_worker, args=(image_deck, preload_queue), daemon=True).start()
 
     #game loop
     clock = pygame.time.Clock()
@@ -60,7 +72,11 @@ def main():
                         if puzzle.button_rect.collidepoint(event.pos):
                             cleanup_audio(puzzle.audio_path)
 
-                            puzzle = new_puzzle(image_deck)
+                            next_media = preload_queue.get()
+                            puzzle = new_puzzle(next_media)
+
+                            threading.Thread(target=preload_worker, args=(image_deck, preload_queue), daemon=True).start()
+
                             puzzle_solved = False
                             current_frame = 0
                             anim_timer = 0
