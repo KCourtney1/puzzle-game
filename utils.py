@@ -88,8 +88,8 @@ def load_video(path):
 
         if clip.audio is not None:
             game_dir = Path(__file__).parent.resolve()
-            temp_dir = game_dir / "temp"
-            temp_dir.mkdir(exist_ok=True)
+            temp_dir = game_dir / "temp" / "temp_video"
+            temp_dir.mkdir(parents=True, exist_ok=True)
 
             tmp = tempfile.NamedTemporaryFile(
                 dir=temp_dir,

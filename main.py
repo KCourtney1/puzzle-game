@@ -1,7 +1,7 @@
 from utils import *
 from puzzle import *
+from imageDeck import *
 from tile import Tile
-from imageDeck import ImageDeck
 import threading
 import queue
 
@@ -19,7 +19,9 @@ def main():
     font = pygame.font.SysFont(None, 48)
     pygame.display.set_caption("Image Puzzle Game")
 
-    image_deck = ImageDeck()
+    #image_deck = LocalImageDeck()
+    image_deck = PexelsImageDeck()
+
     first_media = load_media(image_deck)
     puzzle = new_puzzle(first_media)
 
@@ -155,6 +157,9 @@ def main():
             text_rect = text_surf.get_rect(center = puzzle.button_rect.center)
             puzzle.screen.blit(text_surf,text_rect)
         pygame.display.flip()
+
+    if puzzle and puzzle.audio_path:
+        cleanup_audio(puzzle.audio_path)
     pygame.quit()
 
 if __name__ == "__main__":
