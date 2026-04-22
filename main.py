@@ -77,6 +77,8 @@ def main():
                             next_media = preload_queue.get()
                             puzzle = new_puzzle(next_media)
 
+                            clear_temp_folders(exclude_path=puzzle.audio_path)
+
                             threading.Thread(target=preload_worker, args=(image_deck, preload_queue), daemon=True).start()
 
                             puzzle_solved = False
@@ -160,6 +162,7 @@ def main():
 
     if puzzle and puzzle.audio_path:
         cleanup_audio(puzzle.audio_path)
+    clear_temp_folders()
     pygame.quit()
 
 if __name__ == "__main__":

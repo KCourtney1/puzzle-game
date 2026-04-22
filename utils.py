@@ -10,6 +10,27 @@ import random
 def clamp(val, low, high):
     return max(low, min(val, high))
 
+def clear_temp_folders(exclude_path=None):
+    """Removes all files from the temp directories except the currently active audio."""
+    game_dir = Path(__file__).parent.resolve()
+    temp_root = game_dir / "temp"
+    
+    if not temp_root.exists():
+        return
+
+    exclude_path = Path(exclude_path).resolve() if exclude_path else None
+    for folder in temp_root.iterdir():
+        if folder.is_dir():
+            for file in folder.iterdir():
+                # Skip if this is the file we are about to play
+                if exclude_path and file.resolve() == exclude_path:
+                    continue
+                
+                try:
+                    file.unlink()
+                except Exception:
+                    pass
+
 def cleanup_audio(audio_path):
     pygame.mixer.music.stop()
     pygame.mixer.music.unload()

@@ -1,6 +1,7 @@
 from utils import *
 import requests
 import tempfile
+import urllib.parse
 
 class LocalImageDeck:
     def __init__(self):
@@ -37,13 +38,6 @@ class PexelsImageDeck:
         game_dir = Path(__file__).parent.resolve()
         self.temp_dir = game_dir / "temp" / "temp_pexels"
         self.temp_dir.mkdir(parents=True, exist_ok=True)
-
-        for old_file in self.temp_dir.iterdir():
-            if old_file.is_file():
-                try:
-                    old_file.unlink()
-                except Exception:
-                    pass
         
         self.shuffle_deck()
     
