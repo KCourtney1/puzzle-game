@@ -1,7 +1,7 @@
 import pygame
 import random
 import utils
-import tile
+from tile import Tile
 from dataclasses import dataclass
 from config import GRID_SIZE
 
@@ -32,7 +32,7 @@ def create_puzzle(frames):
             )
 
             tile_frames = [frame.subsurface(rect)for frame in frames]
-            tiles.append(tile.Tile(tile_frames, col, row))
+            tiles.append(Tile(tile_frames, col, row))
 
     # Shuffle positions
     positions = [(col, row)
