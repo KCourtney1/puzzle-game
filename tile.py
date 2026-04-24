@@ -1,4 +1,5 @@
-from utils import *
+import pygame
+from config import FLASH_TIME
 
 class Tile:
     def __init__(self, tile_frames, col, row):

@@ -1,6 +1,9 @@
-from utils import *
-from tile import Tile
+import pygame
+import random
+import utils
+import tile
 from dataclasses import dataclass
+from config import GRID_SIZE
 
 @dataclass
 class PuzzleData:
@@ -29,7 +32,7 @@ def create_puzzle(frames):
             )
 
             tile_frames = [frame.subsurface(rect)for frame in frames]
-            tiles.append(Tile(tile_frames, col, row))
+            tiles.append(tile.Tile(tile_frames, col, row))
 
     # Shuffle positions
     positions = [(col, row)
@@ -47,7 +50,7 @@ def new_puzzle(preloaded_media):
     
     tiles, width, height, tile_w, tile_h = create_puzzle(frames)
     screen = pygame.display.set_mode((width, height))
-    button_rect = create_button(width, height)
+    button_rect = utils.create_button(width, height)
 
     return PuzzleData(
         frames, 

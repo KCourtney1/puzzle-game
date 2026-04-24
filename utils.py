@@ -10,6 +10,16 @@ import random
 def clamp(val, low, high):
     return max(low, min(val, high))
 
+def create_button(width, height):
+    button_width = 250
+    button_height = 60
+    return pygame.Rect(
+        (width // 2) - (button_width // 2),
+        height - button_height - 10,
+        button_width,
+        button_height
+    )
+
 def clear_temp_folders(exclude_path=None):
     """Removes all files from the temp directories except the currently active audio."""
     game_dir = Path(__file__).parent.resolve()
@@ -18,18 +28,22 @@ def clear_temp_folders(exclude_path=None):
     if not temp_root.exists():
         return
 
-    exclude_path = Path(exclude_path).resolve() if exclude_path else None
+    target_exclude = Path(exclude_path).resolve() if exclude_path else None
     for folder in temp_root.iterdir():
         if folder.is_dir():
             for file in folder.iterdir():
-                # Skip if this is the file we are about to play
-                if exclude_path and file.resolve() == exclude_path:
+                if target_exclude and file.resolve() == target_exclude:
                     continue
-                
                 try:
                     file.unlink()
                 except Exception:
                     pass
+            
+            # try:
+            #     if not any(folder.iterdir()):
+            #         folder.rmdir()
+            # except Exception as e:
+            #     print(f"Folder cleanup failed: {e}")
 
 def cleanup_audio(audio_path):
     pygame.mixer.music.stop()
@@ -39,7 +53,7 @@ def cleanup_audio(audio_path):
         try:
             os.remove(audio_path)
         except PermissionError:
-            pass
+            print("Audio still locked, skipping delete.")
 
 def load_media(deck):
     path = deck.next_image()
@@ -165,13 +179,3 @@ def get_scaled_size(width, height):
     if scale < 1.0:
         return int(width * scale), int(height * scale)
     return width, height
-
-def create_button(width, height):
-    button_width = 250
-    button_height = 60
-    return pygame.Rect(
-        (width // 2) - (button_width // 2),
-        height - button_height - 10,
-        button_width,
-        button_height
-    )
