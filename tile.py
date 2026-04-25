@@ -1,5 +1,5 @@
 import pygame
-from config import FLASH_TIME
+import config
 
 class Tile:
     def __init__(self, tile_frames, col, row):
@@ -9,15 +9,20 @@ class Tile:
 
         self.tile_w = tile_frames[0].get_width()
         self.tile_h = tile_frames[0].get_height()
+        self.offset_x = 0
+        self.offset_y = 0
 
         self.rect = pygame.Rect((col * self.tile_w), (row * self.tile_h), self.tile_w, self.tile_h)
+        self.flash_surf = pygame.Surface((self.rect.width, self.rect.height), pygame.SRCALPHA)
+        self.border_surf = pygame.Surface((self.rect.width, self.rect.height),pygame.SRCALPHA)
         self.flash_timer = 0
+        
 
     def move_to(self, col, row):
         self.current_pos = (col, row)
         self.rect.topleft = (
-            col * self.tile_w,
-            row * self.tile_h
+            self.offset_x + (col * self.tile_w),
+            self.offset_y + (row * self.tile_h)
         )
 
     def is_correct(self):
@@ -25,26 +30,31 @@ class Tile:
 
     def flash_if_correct(self):
         if self.is_correct():
-            self.flash_timer = FLASH_TIME
+            self.flash_timer = config.FLASH_TIME
 
-    def draw(self, screen, is_dragged, frame_index = 0):
+    def draw(self, screen, is_dragged, frame_index=0):
         current_img = self.tile_frames[frame_index % len(self.tile_frames)]
-
         screen.blit(current_img, self.rect.topleft)
-        border_surf = pygame.Surface((self.rect.width, self.rect.height), pygame.SRCALPHA)
+        is_correct = self.is_correct()
 
-        if self.is_correct():
-            color = (50, 50, 50, 0)
-            thickness = 1
-        else:
-            color = (50, 50, 50, 180)
-            thickness = 2
+        # Only draw the grid border if it's NOT correct
+        if not is_correct:
+            pygame.draw.rect(self.border_surf, config.TILE_BORDER_COLOR, self.border_surf.get_rect(), 2)
+            screen.blit(self.border_surf, self.rect.topleft)
 
-        pygame.draw.rect(border_surf, color, border_surf.get_rect(), thickness)
-        screen.blit(border_surf, self.rect.topleft)
+        # Handle the "Snap" flash overlay
+        if self.flash_timer > 0:
+            if is_correct:
+                flash_color = config.CORRECT_FLASH_BORDER_COLOR
+            else:
+                flash_color = config.INCORRECT_FLASH_BORDER_COLOR
+            pygame.draw.rect(self.flash_surf, flash_color, self.flash_surf.get_rect())
+            screen.blit(self.flash_surf, self.rect.topleft)
 
+        # Draw Outer Borders (Drag or Flash)
         if is_dragged:
-            pygame.draw.rect(screen, (255, 0, 0), self.rect, 3)
+            pygame.draw.rect(screen, config.SKIP_BUTTON_BORDER, self.rect, 3)
         elif self.flash_timer > 0:
-            pygame.draw.rect(screen, (0, 255, 0), self.rect, 3)
+            border_color = config.CORRECT_FLASH_COLOR if is_correct else config.INCORRECT_FLASH_COLOR
+            pygame.draw.rect(screen, border_color, self.rect, 3)
             self.flash_timer -= 1

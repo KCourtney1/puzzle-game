@@ -33,7 +33,7 @@ def handle_events(puzzle, state, preload_queue, job_q, deck):
         elif event.type == pygame.MOUSEBUTTONDOWN:
             if event.button == 1:
                 if state["puzzle_solved"]:
-                    if puzzle.button_rect.collidepoint(event.pos):
+                    if puzzle.button_win.collidepoint(event.pos):
                         utils.cleanup_audio(puzzle.audio_path)
                         
                         try:
@@ -45,9 +45,22 @@ def handle_events(puzzle, state, preload_queue, job_q, deck):
                         state["next_media"] = next_media
                         state["load_next"] = True
                 else:
+                    if puzzle.button_skip.collidepoint(event.pos):
+                        utils.cleanup_audio(puzzle.audio_path)
+
+                        try:
+                            next_media = preload_queue.get()
+                        except queue.Empty:
+                            print("Preload timeout")
+                            return
+                        state["next_media"] = next_media
+                        state["load_next"] = True
+                        return
+
                     for t in reversed(puzzle.tiles):
                         if t.rect.collidepoint(event.pos):
                             state["dragged_tile"] = t
+                            state["start_pos"] = t.current_pos
                             mouse_x, mouse_y = event.pos
 
                             state["offset_x"] = (t.rect.x - mouse_x)
@@ -68,24 +81,34 @@ def handle_events(puzzle, state, preload_queue, job_q, deck):
         elif event.type == pygame.MOUSEBUTTONUP:
             dragged = state["dragged_tile"]
 
-            if event.button == 1 and dragged:
-                center_x, center_y = dragged.rect.center
-                col = center_x // dragged.tile_w
-                row = center_y // dragged.tile_h
+            if event.button == 1 and dragged is not None:
+                puzzle_rect = pygame.Rect(dragged.offset_x, 
+                                          dragged.offset_y, 
+                                          puzzle.tile_w * config.GRID_SIZE, 
+                                          puzzle.tile_h * config.GRID_SIZE)
+                if puzzle_rect.collidepoint(event.pos):
+                    rel_x = dragged.rect.centerx - dragged.offset_x
+                    rel_y = dragged.rect.centery - dragged.offset_y
 
-                drop_col = utils.clamp(col, 0, config.GRID_SIZE - 1)
-                drop_row = utils.clamp(row, 0, config.GRID_SIZE - 1)
-                target_tile = next((t for t in puzzle.tiles
-                        if t != dragged and t.current_pos == (drop_col, drop_row)), None
-                )
+                    col = rel_x // dragged.tile_w
+                    row = rel_y // dragged.tile_h
 
-                if target_tile:
-                    puzzle_mod.swap_tiles(dragged, target_tile)
+                    drop_col = utils.clamp(col, 0, config.GRID_SIZE - 1)
+                    drop_row = utils.clamp(row, 0, config.GRID_SIZE - 1)
+                    target_tile = next((t for t in puzzle.tiles
+                            if t != dragged and t.current_pos == (drop_col, drop_row)), None
+                    )
+
+                    if target_tile:
+                        puzzle_mod.swap_tiles(dragged, target_tile)
+                    else:
+                        dragged.move_to(drop_col, drop_row)
+                        dragged.flash_if_correct()
                 else:
-                    dragged.move_to(drop_col, drop_row)
-                    dragged.flash_if_correct()
-
+                    if state["start_pos"] is not None:
+                        dragged.move_to(*state["start_pos"])
             state["dragged_tile"] = None
+            state["start_pos"] = None
             if puzzle_is_solved(puzzle.tiles): state["puzzle_solved"] = True
         
 def update_puzzle(puzzle, state, job_q, preload_queue, deck):
@@ -128,21 +151,46 @@ def update_animation(puzzle, state, dt):
             state["current_frame"] = ((current_frame + 1)% len(puzzle.frames))
 
 def draw(puzzle, state, font):
-    puzzle.screen.fill((0, 0, 0))
+    puzzle.screen.fill(config.BG_MAIN)
+    puzzle_area = pygame.Rect(config.SIDEBAR_WIDTH, 0, config.MAX_WINDOW_SIZE, config.MAX_WINDOW_SIZE)
+    pygame.draw.rect(puzzle.screen, config.BG_PUZZLE, puzzle_area)
 
     dragged = state["dragged_tile"]
     frame = state["current_frame"]
+    mouse_pos = pygame.mouse.get_pos()
+    is_clicking = pygame.mouse.get_pressed()[0]
 
     for t in puzzle.tiles:
-        t.draw(puzzle.screen, t == dragged, frame)
+        if t != dragged:
+            t.draw(puzzle.screen, False, frame)
+    
+    if dragged:
+        dragged.draw(puzzle.screen, True, frame)
 
     if state["puzzle_solved"]:
-        pygame.draw.rect(puzzle.screen, (60, 200, 40), puzzle.button_rect, border_radius=10)
-        pygame.draw.rect(puzzle.screen, (40, 180, 40), puzzle.button_rect, 3, border_radius=10)
+        if puzzle.button_win.collidepoint(mouse_pos) and is_clicking:
+            current_color = config.WIN_BUTTON_PRESS_COLOR
+        else:
+            current_color = config.WIN_BUTTON_COLOR
 
-        text_surf = font.render("Next Puzzle", True, (255, 255, 255))
-        text_rect = text_surf.get_rect(center=puzzle.button_rect.center)
+        pygame.draw.rect(puzzle.screen, current_color, puzzle.button_win, border_radius=10)
+        pygame.draw.rect(puzzle.screen, config.WIN_BUTTON_BORDER, puzzle.button_win, 3, border_radius=10)
 
+        text_surf = font.render("Next Puzzle", True, config.TEXT_COLOR)
+        text_rect = text_surf.get_rect(center=puzzle.button_win.center)
+
+        puzzle.screen.blit(text_surf, text_rect)
+    else:
+        if puzzle.button_skip.collidepoint(mouse_pos) and is_clicking:
+            current_color = config.SKIP_BUTTON_PRESS_COLOR
+        else:
+            current_color = config.SKIP_BUTTON_COLOR
+
+        pygame.draw.rect(puzzle.screen, current_color, puzzle.button_skip, border_radius=8)
+        pygame.draw.rect(puzzle.screen, config.SKIP_BUTTON_BORDER, puzzle.button_skip, 3, border_radius=8)
+
+        text_surf = font.render("Skip", True, config.TEXT_COLOR)
+        text_rect = text_surf.get_rect(center=puzzle.button_skip.center)
         puzzle.screen.blit(text_surf, text_rect)
     pygame.display.flip()
 
@@ -152,8 +200,7 @@ def main():
     pygame.display.set_caption("Image Puzzle Game")
     font = pygame.font.SysFont(None, 48)
 
-    #deck = imageDeck.LocalImageDeck()
-    deck = imageDeck.PexelsImageDeck()
+    deck = imageDeck.LocalImageDeck()
 
     job_q = queue.Queue()
     preload_queue = queue.Queue()
@@ -176,6 +223,7 @@ def main():
         "running": True,
         "puzzle_solved": False,
         "dragged_tile": None,
+        "start_pos": None,
         "offset_x": 0,
         "offset_y": 0,
         "anim_timer": 0,

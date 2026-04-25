@@ -3,7 +3,7 @@ import random
 import utils
 from tile import Tile
 from dataclasses import dataclass
-from config import GRID_SIZE
+import config
 
 @dataclass
 class PuzzleData:
@@ -12,18 +12,19 @@ class PuzzleData:
     audio_path: str | None
     tiles: list
     screen: pygame.Surface
-    button_rect: pygame.Rect
+    button_win: pygame.Rect
+    button_skip: pygame.Rect
     tile_w: int
     tile_h: int
 
 def create_puzzle(frames):
     img_width, img_height = frames[0].get_size()
-    tile_w = img_width // GRID_SIZE
-    tile_h = img_height // GRID_SIZE
+    tile_w = img_width // config.GRID_SIZE
+    tile_h = img_height // config.GRID_SIZE
 
     tiles = []
-    for row in range(GRID_SIZE):
-        for col in range(GRID_SIZE):
+    for row in range(config.GRID_SIZE):
+        for col in range(config.GRID_SIZE):
             rect = pygame.Rect(
                 col * tile_w, 
                 row * tile_h, 
@@ -36,8 +37,8 @@ def create_puzzle(frames):
 
     # Shuffle positions
     positions = [(col, row)
-        for row in range(GRID_SIZE)
-        for col in range(GRID_SIZE)
+        for row in range(config.GRID_SIZE)
+        for col in range(config.GRID_SIZE)
     ]
 
     random.shuffle(positions)
@@ -47,19 +48,23 @@ def create_puzzle(frames):
 
 def new_puzzle(preloaded_media):
     frames, durations, audio_path = preloaded_media
-    
-    tiles, width, height, tile_w, tile_h = create_puzzle(frames)
-    screen = pygame.display.set_mode((width, height))
-    button_rect = utils.create_button(width, height)
+    tiles, img_w, img_h, tile_w, tile_h = create_puzzle(frames)
+
+    screen = pygame.display.set_mode((config.MAX_WINDOW_SIZE + config.SIDEBAR_WIDTH, config.MAX_WINDOW_SIZE))
+    offset_x = config.SIDEBAR_WIDTH + (config.MAX_WINDOW_SIZE - img_w) // 2
+    offset_y = (config.MAX_WINDOW_SIZE - img_h) // 2
+
+    for t in tiles:
+        t.offset_x = offset_x
+        t.offset_y = offset_y
+        t.move_to(*t.current_pos)
+
+    button_win = utils.create_button(25, 50, 200, 60)
+    button_skip = utils.create_button(25, 50, 200, 60)
 
     return PuzzleData(
-        frames, 
-        durations, 
-        audio_path, 
-        tiles, screen, 
-        button_rect, 
-        tile_w, 
-        tile_h
+        frames, durations, audio_path, tiles, screen, 
+        button_win, button_skip, tile_w, tile_h
     )
 
 def swap_tiles(tile1, tile2):

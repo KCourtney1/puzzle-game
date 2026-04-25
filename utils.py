@@ -1,4 +1,4 @@
-from config import *
+import config
 import pygame
 from pathlib import Path
 from PIL import Image
@@ -10,12 +10,10 @@ import random
 def clamp(val, low, high):
     return max(low, min(val, high))
 
-def create_button(width, height):
-    button_width = 250
-    button_height = 60
+def create_button(pos_x, pos_y, button_width, button_height):
     return pygame.Rect(
-        (width // 2) - (button_width // 2),
-        height - button_height - 10,
+        pos_x,
+        pos_y,
         button_width,
         button_height
     )
@@ -110,9 +108,9 @@ def load_video(path):
 
     total_frames_available = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     if total_frames_available <= 0: 
-        total_frames_available = MAX_VIDEO_FRAMES
+        total_frames_available = config.MAX_VIDEO_FRAMES
 
-    frames_to_extract = min(total_frames_available, MAX_VIDEO_FRAMES)
+    frames_to_extract = min(total_frames_available, config.MAX_VIDEO_FRAMES)
     video_length_seconds = frames_to_extract / fps if fps > 0 else 5.0
     try:
         from moviepy import VideoFileClip
@@ -162,7 +160,7 @@ def load_video(path):
         
         frames.append(pygame_image)
         durations.append(frame_duration)
-        if len(frames) >= MAX_VIDEO_FRAMES:
+        if len(frames) >= config.MAX_VIDEO_FRAMES:
             break
     cap.release()
 
@@ -174,8 +172,6 @@ def load_video(path):
     return frames, durations,audio_path
 
 def get_scaled_size(width, height):
-    """Calculates the new dimensions while maintaining aspect ratio."""
-    scale = min(MAX_WINDOW_SIZE / width, MAX_WINDOW_SIZE / height, 1.0)
-    if scale < 1.0:
-        return int(width * scale), int(height * scale)
-    return width, height
+    """Scale relative to the MAX_WINDOW_SIZE (the puzzle area), not the whole screen while maintaining aspect ratio"""
+    scale = min(config.MAX_WINDOW_SIZE / width, config.MAX_WINDOW_SIZE / height, 1.0)
+    return int(width * scale), int(height * scale)
