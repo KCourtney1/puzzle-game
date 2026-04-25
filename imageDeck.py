@@ -1,14 +1,15 @@
-from utils import *
+import utils
 import requests
 import tempfile
 import urllib.parse
+import config
 
 class LocalImageDeck:
     def __init__(self):
-        image_dir = Path(__file__).parent.resolve() / "images"
+        image_dir = utils.Path(__file__).parent.resolve() / "images"
         self.all_images = [
             f for f in image_dir.iterdir()
-            if f.is_file() and f.suffix.lower() in VALID_EXT
+            if f.is_file() and f.suffix.lower() in config.VALID_EXT
         ]
 
         if not self.all_images:
@@ -19,7 +20,7 @@ class LocalImageDeck:
     def shuffle_deck(self):
         """Refill and shuffle the deck."""
         self.deck = self.all_images.copy()
-        random.shuffle(self.deck)
+        utils.random.shuffle(self.deck)
 
     def next_image(self):
         """Get next image from deck."""
@@ -31,11 +32,11 @@ class PexelsImageDeck:
     def __init__(self, query=None, per_page = 15):
         self.query = query
         self.per_page = per_page
-        self.headers = {"Authorization": PEXELS_API_KEY}
+        self.headers = {"Authorization": config.PEXELS_API_KEY}
         self.deck_urls = []
         self.page = 1
 
-        game_dir = Path(__file__).parent.resolve()
+        game_dir = utils.Path(__file__).parent.resolve()
         self.temp_dir = game_dir / "temp" / "temp_pexels"
         self.temp_dir.mkdir(parents=True, exist_ok=True)
         
@@ -56,7 +57,7 @@ class PexelsImageDeck:
             
             # full-resolution image
             self.deck_urls = [photo['src']['original'] for photo in photos]
-            random.shuffle(self.deck_urls)
+            utils.random.shuffle(self.deck_urls)
             self.page += 1  # Increment so the next shuffle gets fresh images
         else:
             print(f"Error fetching from Pexels: {response.status_code}")
@@ -83,7 +84,7 @@ class PexelsImageDeck:
             tmp.write(response.content)
             tmp.close()
             
-            return Path(tmp.name)
+            return utils.Path(tmp.name)
         else:
             print(f"Failed to download image. Status: {response.status_code}")
             # If download fails, try the next one recursively
