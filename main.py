@@ -6,10 +6,9 @@ import traceback
 import utils
 import imageDeck
 import puzzle as puzzle_mod
+import events
 import config
-
-def puzzle_is_solved(tiles):
-    return all(t.is_correct() for t in tiles)
+import ui
 
 def preload_worker(job_q, result_q):
     """Runs in the background to extract the next media file."""
@@ -18,107 +17,41 @@ def preload_worker(job_q, result_q):
         if deck is None:
             break
 
-        try:
-            media_data = utils.load_media(deck)
-            result_q.put(media_data)
-        except Exception:
-            print("Preload error:")
-            traceback.print_exc()
-
-def handle_events(puzzle, state, preload_queue, job_q, deck):
-    for event in pygame.event.get():
-        if event.type == pygame.QUIT:
-            state["running"] = False
-
-        elif event.type == pygame.MOUSEBUTTONDOWN:
-            if event.button == 1:
-                if state["puzzle_solved"]:
-                    if puzzle.button_win.collidepoint(event.pos):
-                        utils.cleanup_audio(puzzle.audio_path)
-                        
-                        try:
-                            next_media = preload_queue.get()
-                        except queue.Empty:
-                            print("Preload timeout")
-                            return
-
-                        state["next_media"] = next_media
-                        state["load_next"] = True
-                else:
-                    if puzzle.button_skip.collidepoint(event.pos):
-                        utils.cleanup_audio(puzzle.audio_path)
-
-                        try:
-                            next_media = preload_queue.get()
-                        except queue.Empty:
-                            print("Preload timeout")
-                            return
-                        state["next_media"] = next_media
-                        state["load_next"] = True
-                        return
-
-                    for t in reversed(puzzle.tiles):
-                        if t.rect.collidepoint(event.pos):
-                            state["dragged_tile"] = t
-                            state["start_pos"] = t.current_pos
-                            mouse_x, mouse_y = event.pos
-
-                            state["offset_x"] = (t.rect.x - mouse_x)
-                            state["offset_y"] = (t.rect.y - mouse_y)
-
-                            puzzle.tiles.append(
-                                puzzle.tiles.pop(
-                                    puzzle.tiles.index(t)
-                                )
-                            )
-                            break
-        elif event.type == pygame.MOUSEMOTION:
-            dragged = state["dragged_tile"]
-            if dragged:
-                mouse_x, mouse_y = event.pos
-                dragged.rect.x = (mouse_x + state["offset_x"])
-                dragged.rect.y = (mouse_y + state["offset_y"])
-        elif event.type == pygame.MOUSEBUTTONUP:
-            dragged = state["dragged_tile"]
-
-            if event.button == 1 and dragged is not None:
-                puzzle_rect = pygame.Rect(dragged.offset_x, 
-                                          dragged.offset_y, 
-                                          puzzle.tile_w * config.GRID_SIZE, 
-                                          puzzle.tile_h * config.GRID_SIZE)
-                if puzzle_rect.collidepoint(event.pos):
-                    rel_x = dragged.rect.centerx - dragged.offset_x
-                    rel_y = dragged.rect.centery - dragged.offset_y
-
-                    col = rel_x // dragged.tile_w
-                    row = rel_y // dragged.tile_h
-
-                    drop_col = utils.clamp(col, 0, config.GRID_SIZE - 1)
-                    drop_row = utils.clamp(row, 0, config.GRID_SIZE - 1)
-                    target_tile = next((t for t in puzzle.tiles
-                            if t != dragged and t.current_pos == (drop_col, drop_row)), None
-                    )
-
-                    if target_tile:
-                        puzzle_mod.swap_tiles(dragged, target_tile)
-                    else:
-                        dragged.move_to(drop_col, drop_row)
-                        dragged.flash_if_correct()
-                else:
-                    if state["start_pos"] is not None:
-                        dragged.move_to(*state["start_pos"])
-            state["dragged_tile"] = None
-            state["start_pos"] = None
-            if puzzle_is_solved(puzzle.tiles): state["puzzle_solved"] = True
+        while True:
+            try:
+                media_data = utils.load_media(deck)
+                if media_data is not None:
+                    result_q.put(media_data)
+                    break
+            except Exception as e:
+                print(f"Background preload failed ({e}). Fetching next image...")
+                # traceback.print_exc()
+                import time
+                time.sleep(1)
         
-def update_puzzle(puzzle, state, job_q, preload_queue, deck):
+def update_puzzle(puzzle, state, job_q, preload_queue, deck, font):
+    if state.get("waiting_for_media"):
+        try:
+            next_media = preload_queue.get_nowait()
+            state["next_media"] = next_media
+            state["load_next"] = True
+            state["waiting_for_media"] = False
+        except queue.Empty:
+            # Still downloading! Do nothing and check again on the next frame.
+            pass
+
     if state.get("load_next"):
         next_media = state["next_media"]
-        new_puzzle = puzzle_mod.new_puzzle(next_media)
+
+        def volume_callback(volume):
+            pygame.mixer.music.set_volume(volume)
+            state["volume"] = volume
+
+        new_puzzle = puzzle_mod.Puzzle(next_media, font, state["volume"], volume_callback)
 
         pygame.mixer.music.stop()
         pygame.mixer.music.unload()
-        utils.clear_temp_folders(exclude_path=new_puzzle.audio_path)
+        utils.clear_temp_folders(exclude_paths=[new_puzzle.audio_path, new_puzzle.source_path])
 
         puzzle = new_puzzle
         state["puzzle_solved"] = False
@@ -132,7 +65,7 @@ def update_puzzle(puzzle, state, job_q, preload_queue, deck):
                 pygame.mixer.music.load(puzzle.audio_path)
                 pygame.mixer.music.play(-1)
             except pygame.error as e:
-                print("Audio load failed:", e)
+                print("Audio load failed:", e)     
     return puzzle
 
 def update_animation(puzzle, state, dt):
@@ -150,6 +83,12 @@ def update_animation(puzzle, state, dt):
             state["anim_timer"] -= frame_duration
             state["current_frame"] = ((current_frame + 1)% len(puzzle.frames))
 
+def update_volume(mouse_x, puzzle, state):
+    clamped_x = utils.clamp(mouse_x, puzzle.slider_rect.left, puzzle.slider_rect.right)
+    pct = (clamped_x - puzzle.slider_rect.left) / puzzle.slider_rect.width
+    state["volume"] = pct
+    pygame.mixer.music.set_volume(pct)
+
 def draw(puzzle, state, font):
     puzzle.screen.fill(config.BG_MAIN)
     puzzle_area = pygame.Rect(config.SIDEBAR_WIDTH, 0, config.MAX_WINDOW_SIZE, config.MAX_WINDOW_SIZE)
@@ -157,41 +96,26 @@ def draw(puzzle, state, font):
 
     dragged = state["dragged_tile"]
     frame = state["current_frame"]
-    mouse_pos = pygame.mouse.get_pos()
-    is_clicking = pygame.mouse.get_pressed()[0]
 
+    # --- Draw Tiles ---
     for t in puzzle.tiles:
         if t != dragged:
             t.draw(puzzle.screen, False, frame)
-    
     if dragged:
         dragged.draw(puzzle.screen, True, frame)
 
+    # --- Draw UI Objects ---
+    puzzle.slider.draw(puzzle.screen)
+    puzzle.button_save.draw(puzzle.screen)
+    
     if state["puzzle_solved"]:
-        if puzzle.button_win.collidepoint(mouse_pos) and is_clicking:
-            current_color = config.WIN_BUTTON_PRESS_COLOR
-        else:
-            current_color = config.WIN_BUTTON_COLOR
-
-        pygame.draw.rect(puzzle.screen, current_color, puzzle.button_win, border_radius=10)
-        pygame.draw.rect(puzzle.screen, config.WIN_BUTTON_BORDER, puzzle.button_win, 3, border_radius=10)
-
-        text_surf = font.render("Next Puzzle", True, config.TEXT_COLOR)
-        text_rect = text_surf.get_rect(center=puzzle.button_win.center)
-
-        puzzle.screen.blit(text_surf, text_rect)
+        puzzle.button_win.draw(puzzle.screen)
     else:
-        if puzzle.button_skip.collidepoint(mouse_pos) and is_clicking:
-            current_color = config.SKIP_BUTTON_PRESS_COLOR
-        else:
-            current_color = config.SKIP_BUTTON_COLOR
+        puzzle.button_skip.draw(puzzle.screen)
 
-        pygame.draw.rect(puzzle.screen, current_color, puzzle.button_skip, border_radius=8)
-        pygame.draw.rect(puzzle.screen, config.SKIP_BUTTON_BORDER, puzzle.button_skip, 3, border_radius=8)
+    if state.get("waiting_for_media"):
+        ui.draw_loading_overlay(puzzle.screen, font)
 
-        text_surf = font.render("Skip", True, config.TEXT_COLOR)
-        text_rect = text_surf.get_rect(center=puzzle.button_skip.center)
-        puzzle.screen.blit(text_surf, text_rect)
     pygame.display.flip()
 
 def main():
@@ -200,25 +124,14 @@ def main():
     pygame.display.set_caption("Image Puzzle Game")
     font = pygame.font.SysFont(None, 48)
 
-    deck = imageDeck.LocalImageDeck()
+    #deck = imageDeck.LocalImageDeck()
+    deck = imageDeck.PexelsImageDeck()
 
     job_q = queue.Queue()
     preload_queue = queue.Queue()
     worker = threading.Thread(target=preload_worker, args=(job_q, preload_queue), daemon=True)
     worker.start()
 
-    first_media = utils.load_media(deck)
-    puzzle = puzzle_mod.new_puzzle(first_media)
-
-    if puzzle.audio_path:
-        pygame.mixer.music.load(puzzle.audio_path)
-        pygame.mixer.music.play(-1)
-
-    job_q.put(deck)
-
-
-    #game loop
-    clock = pygame.time.Clock()
     state = {
         "running": True,
         "puzzle_solved": False,
@@ -229,20 +142,35 @@ def main():
         "anim_timer": 0,
         "current_frame": 0,
         "old_audio": None,
-        "deck": deck
+        "deck": deck,
+        "volume": config.INITIAL_VOLUME
     }
+
+    def volume_callback(vol):
+        pygame.mixer.music.set_volume(vol)
+        state["volume"] = vol
+    
+    pygame.mixer.music.set_volume(state["volume"])
+    first_media = utils.load_media(deck)
+    puzzle = puzzle_mod.Puzzle(first_media, font, state["volume"], volume_callback)
+
+    if puzzle.audio_path:
+        pygame.mixer.music.load(puzzle.audio_path)
+        pygame.mixer.music.play(-1)
+
+    job_q.put(deck)
+    clock = pygame.time.Clock()
 
     while state["running"]:
         dt = clock.tick(config.FPS)
 
         update_animation(puzzle, state, dt)
-        handle_events(puzzle, state, preload_queue, job_q, deck)
+        events.handle_events(puzzle, state, preload_queue, job_q, deck)
 
-        puzzle = update_puzzle(puzzle, state, job_q, preload_queue, deck)
+        puzzle = update_puzzle(puzzle, state, job_q, preload_queue, deck, font)
         if state.get("old_audio"):
             utils.cleanup_audio(state["old_audio"])
             state["old_audio"] = None
-
         draw(puzzle, state, font)
     
     if puzzle.audio_path:

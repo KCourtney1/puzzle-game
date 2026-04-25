@@ -5,10 +5,16 @@ from PIL import Image
 import cv2
 import tempfile
 import os
+import shutil
 import random
 
 def clamp(val, low, high):
     return max(low, min(val, high))
+
+def get_scaled_size(width, height):
+    """Scale relative to the MAX_WINDOW_SIZE (the puzzle area), not the whole screen while maintaining aspect ratio"""
+    scale = min(config.MAX_WINDOW_SIZE / width, config.MAX_WINDOW_SIZE / height, 1.0)
+    return int(width * scale), int(height * scale)
 
 def create_button(pos_x, pos_y, button_width, button_height):
     return pygame.Rect(
@@ -18,7 +24,7 @@ def create_button(pos_x, pos_y, button_width, button_height):
         button_height
     )
 
-def clear_temp_folders(exclude_path=None):
+def clear_temp_folders(exclude_paths=None):
     """Removes all files from the temp directories except the currently active audio."""
     game_dir = Path(__file__).parent.resolve()
     temp_root = game_dir / "temp"
@@ -26,11 +32,16 @@ def clear_temp_folders(exclude_path=None):
     if not temp_root.exists():
         return
 
-    target_exclude = Path(exclude_path).resolve() if exclude_path else None
+    target_excludes = []
+    if exclude_paths:
+        for p in exclude_paths:
+            if p:
+                target_excludes.append(Path(p).resolve())
+    
     for folder in temp_root.iterdir():
         if folder.is_dir():
             for file in folder.iterdir():
-                if target_exclude and file.resolve() == target_exclude:
+                if file.resolve() in target_excludes:
                     continue
                 try:
                     file.unlink()
@@ -69,7 +80,7 @@ def load_img(path):
     new_w, new_h = get_scaled_size(img.get_width(), img.get_height())
     if (new_w, new_h) != img.get_size():
         img = pygame.transform.smoothscale(img, (new_w, new_h))
-    return [img], [100], None
+    return [img], [100], None, path
 
 def load_gif(path):
     frames = []
@@ -95,7 +106,7 @@ def load_gif(path):
             pil_img.seek(pil_img.tell() + 1)
     except EOFError:
         pass
-    return frames, durations, None
+    return frames, durations, None, path
 
 def load_video(path):
     frames = []
@@ -167,11 +178,25 @@ def load_video(path):
     if not frames:
         surf = pygame.Surface((400, 400))
         surf.fill((255, 0, 0)) # Red square fallback
-        return [surf], [100]
+        return [surf], [100], None, path
     
-    return frames, durations,audio_path
+    return frames, durations, audio_path, path
 
-def get_scaled_size(width, height):
-    """Scale relative to the MAX_WINDOW_SIZE (the puzzle area), not the whole screen while maintaining aspect ratio"""
-    scale = min(config.MAX_WINDOW_SIZE / width, config.MAX_WINDOW_SIZE / height, 1.0)
-    return int(width * scale), int(height * scale)
+def save_to_local(source_path):
+    if not source_path:
+        return False
+    
+    game_dir = Path(__file__).parent.resolve()
+    save_dir = game_dir / "images"
+    save_dir.mkdir(parents=True, exist_ok=True)
+
+    if save_dir in source_path.resolve().parents:
+        return False
+    
+    dest_path = save_dir / source_path.name
+    try:
+        shutil.copy2(source_path, dest_path)
+        return True
+    except Exception as e:
+        print(f"Failed to save file: {e}")
+        return False
