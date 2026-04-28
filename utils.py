@@ -8,6 +8,13 @@ import os
 import shutil
 import random
 
+
+class MediaLoadError(Exception):
+    def __init__(self, message, retryable=False):
+        super().__init__(message)
+        self.retryable = retryable
+
+
 def clamp(val, low, high):
     return max(low, min(val, high))
 
@@ -66,6 +73,8 @@ def cleanup_audio(audio_path):
 
 def load_media(deck):
     path = deck.next_image()
+    if path is None:
+        return None
     ext = path.suffix.lower()
 
     if ext == '.gif':

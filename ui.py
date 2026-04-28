@@ -1,6 +1,83 @@
+from dataclasses import dataclass
+
 import utils
 import config
 import pygame
+
+_loading_overlay_cache = {}
+
+
+@dataclass
+class GameUI:
+    next_button: "Button"
+    skip_button: "Button"
+    save_button: "Button"
+    volume_slider: "VolumeSlider"
+    search_box: "TextBox"
+    seek_bar: "SeekBar"
+
+
+def create_game_ui(font, on_volume_change, initial_volume):
+    return GameUI(
+        next_button=Button(
+            config.WIN_BUTTON_X,
+            config.WIN_BUTTON_Y,
+            config.WIN_BUTTON_WIDTH,
+            config.WIN_BUTTON_HEIGHT,
+            "Next Puzzle",
+            font,
+            config.TEXT_COLOR,
+            config.WIN_BUTTON_COLOR,
+            config.WIN_BUTTON_PRESS_COLOR,
+            config.WIN_BUTTON_BORDER,
+            10,
+        ),
+        skip_button=Button(
+            config.SKIP_BUTTON_X,
+            config.SKIP_BUTTON_Y,
+            config.SKIP_BUTTON_WIDTH,
+            config.SKIP_BUTTON_HEIGHT,
+            "Skip",
+            font,
+            config.TEXT_COLOR,
+            config.SKIP_BUTTON_COLOR,
+            config.SKIP_BUTTON_PRESS_COLOR,
+            config.SKIP_BUTTON_BORDER,
+        ),
+        save_button=Button(
+            config.SAVE_BUTTON_X,
+            config.SAVE_BUTTON_Y,
+            config.SAVE_BUTTON_WIDTH,
+            config.SAVE_BUTTON_HEIGHT,
+            "Save",
+            font,
+            config.TEXT_COLOR,
+            config.SAVE_BUTTON_COLOR,
+            config.SAVE_BUTTON_PRESS_COLOR,
+            config.SAVE_BUTTON_BORDER,
+        ),
+        volume_slider=VolumeSlider(
+            config.SLIDER_X,
+            config.SLIDER_Y,
+            config.SLIDER_WIDTH,
+            config.SLIDER_HEIGHT,
+            initial_volume,
+            on_volume_change,
+        ),
+        search_box=TextBox(
+            config.TEXTBOX_X,
+            config.TEXTBOX_Y,
+            config.TEXTBOX_WIDTH,
+            config.TEXTBOX_HEIGHT,
+            font,
+        ),
+        seek_bar=SeekBar(
+            config.SEEKBAR_X,
+            config.SEEKBAR_Y,
+            config.SEEKBAR_WIDTH,
+            config.SEEKBAR_HEIGHT,
+        ),
+    )
 
 class Button:
     def __init__(self, x, y, width, height, text, font, text_color, base_color, press_color, border_color, border_radius=8, cooldown_ms=100):
@@ -18,6 +95,8 @@ class Button:
 
         self.cooldown_ms = cooldown_ms
         self.last_click_time = 0
+        self.text_surf = self.font.render(self.text, True, self.text_color)
+        self.text_rect = self.text_surf.get_rect(center=self.rect.center)
     
     def handle_event(self, event):
         """Processes events and returns True if the button was clicked."""
@@ -46,10 +125,7 @@ class Button:
         current_color = self.press_color if self.is_pressed else self.base_color
         pygame.draw.rect(screen, current_color, self.rect, border_radius=self.border_radius)
         pygame.draw.rect(screen, self.border_color, self.rect, 3, border_radius=self.border_radius)
-
-        text_surf = self.font.render(self.text, True, self.text_color)
-        text_rect = text_surf.get_rect(center=self.rect.center)
-        screen.blit(text_surf, text_rect)
+        screen.blit(self.text_surf, self.text_rect)
     
 class VolumeSlider:
     def __init__(self, x, y, width, height, initial_volume, on_change_callback):
@@ -58,6 +134,8 @@ class VolumeSlider:
         self.is_dragging = False
         self.on_change_callback = on_change_callback
         self.font = pygame.font.SysFont(None, 28)
+        self._label_pct = None
+        self._label_surf = None
     
     def handle_event(self, event):
         """Processes events and returns True if the slider interacted with it."""
@@ -101,8 +179,11 @@ class VolumeSlider:
         pygame.draw.circle(screen, config.SLIDER_KNOB_COLOR, (knob_x, knob_y), config.SLIDER_KNOB_RADIUS)
 
         # Text
-        vol_text = self.font.render(f"Volume: {int(self.volume * 100)}%", True, config.TEXT_COLOR)
-        screen.blit(vol_text, (self.rect.left, self.rect.top - 30))
+        vol_pct = int(self.volume * 100)
+        if vol_pct != self._label_pct:
+            self._label_pct = vol_pct
+            self._label_surf = self.font.render(f"Volume: {vol_pct}%", True, config.TEXT_COLOR)
+        screen.blit(self._label_surf, (self.rect.left, self.rect.top - 30))
 
 class TextBox:
     def __init__(self, x, y, width, height, font, text=''):
@@ -117,6 +198,7 @@ class TextBox:
         self.text = text
         self.active = False
         self.title_font = pygame.font.SysFont(None, 24)
+        self.title_surf = self.title_font.render("Search / Tags:", True, config.TEXT_COLOR)
 
         # --- Cursor variables ---
         self.cursor_pos = len(self.text)
@@ -258,8 +340,7 @@ class TextBox:
         return False
 
     def draw(self, screen):
-        title_surf = self.title_font.render("Search / Tags:", True, config.TEXT_COLOR)
-        screen.blit(title_surf, (self.rect.x, self.rect.y - 20))
+        screen.blit(self.title_surf, (self.rect.x, self.rect.y - 20))
 
         pygame.draw.rect(screen, self.bg_color, self.rect, border_radius=5)
         pygame.draw.rect(screen, self.color, self.rect, 2, border_radius=5)
@@ -324,7 +405,6 @@ class SeekBar:
         self.rect = pygame.Rect(x, y, width, height)
         self.is_dragging = False
         self.progress = 0.0
-        self.title_font = pygame.font.SysFont(None, 24)
 
     def handle_event(self, event):
         """Processes events and returns progress percentage if dragged, else None."""
@@ -355,10 +435,6 @@ class SeekBar:
         if not self.is_dragging and total_frames > 1:
             self.progress = current_frame / (total_frames - 1)
 
-        # Draw Label
-        title_surf = self.title_font.render("", True, config.TEXT_COLOR)
-        screen.blit(title_surf, (self.rect.x, self.rect.y - 20))
-
         # Track
         pygame.draw.rect(screen, config.SEEKBAR_BG_COLOR, self.rect, border_radius=5)
         
@@ -374,20 +450,26 @@ class SeekBar:
 
 def draw_loading_overlay(screen, font):
     """Draws an unobtrusive floating banner at the bottom of the puzzle area."""
-    text_surf = font.render("Downloading Next Media...", True, config.TEXT_COLOR)
-    
-    padding_x = 40
-    padding_y = 20
-    box_width = text_surf.get_width() + padding_x
-    box_height = text_surf.get_height() + padding_y
-    
-    box_surf = pygame.Surface((box_width, box_height), pygame.SRCALPHA)
-    pygame.draw.rect(box_surf, (30, 30, 35, 200), box_surf.get_rect(), border_radius=15)
-    pygame.draw.rect(box_surf, config.SKIP_BUTTON_BORDER, box_surf.get_rect(), 2, border_radius=15)
-    
-    #centered at bottom of puzzle area
+    cache_key = font.get_height()
+    cached_surfaces = _loading_overlay_cache.get(cache_key)
+    if cached_surfaces is None:
+        text_surf = font.render("Downloading Next Media...", True, config.TEXT_COLOR)
+        padding_x = 40
+        padding_y = 20
+        box_width = text_surf.get_width() + padding_x
+        box_height = text_surf.get_height() + padding_y
+
+        box_surf = pygame.Surface((box_width, box_height), pygame.SRCALPHA)
+        pygame.draw.rect(box_surf, (30, 30, 35, 200), box_surf.get_rect(), border_radius=15)
+        pygame.draw.rect(box_surf, config.SKIP_BUTTON_BORDER, box_surf.get_rect(), 2, border_radius=15)
+        _loading_overlay_cache[cache_key] = (box_surf, text_surf)
+        cached_surfaces = (box_surf, text_surf)
+
+    box_surf, text_surf = cached_surfaces
+
+    # centered at bottom of puzzle area
     center_x = config.SIDEBAR_WIDTH + (config.MAX_WINDOW_SIZE // 2)
-    center_y = config.MAX_WINDOW_SIZE - 60
+    center_y = 40
     
     box_rect = box_surf.get_rect(center=(center_x, center_y))
     text_rect = text_surf.get_rect(center=box_rect.center)

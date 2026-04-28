@@ -36,7 +36,8 @@ class PexelsImageDeck:
     def __init__(self, query=None, per_page = 15):
         self.query = query
         self.per_page = per_page
-        self.headers = {"Authorization": config.PEXELS_API_KEY}
+        self.session = requests.Session()
+        self.session.headers.update({"Authorization": config.PEXELS_API_KEY})
         self.deck_urls = []
 
         self.page = utils.random.randint(1, 100)
@@ -49,38 +50,59 @@ class PexelsImageDeck:
     
     def shuffle_deck(self):
         """Fetch a new page of images from Pexels and shuffle them."""
-        
-        if self.query:
-            url = f"https://api.pexels.com/v1/search?query={self.query}&per_page={self.per_page}&page={self.page}&size=large"
-        else:
-            url = f"https://api.pexels.com/v1/curated?per_page={self.per_page}&page={self.page}"
-        
-        response = requests.get(url, headers=self.headers)
-        if response.status_code == 200:
+        for _ in range(2):
+            if self.query:
+                url = f"https://api.pexels.com/v1/search?query={self.query}&per_page={self.per_page}&page={self.page}&size=large"
+            else:
+                url = f"https://api.pexels.com/v1/curated?per_page={self.per_page}&page={self.page}"
+
+            try:
+                response = self.session.get(url, timeout=config.NETWORK_TIMEOUT)
+            except requests.RequestException as exc:
+                print(f"Error fetching from Pexels: {exc}")
+                self.deck_urls = []
+                return
+
+            if response.status_code != 200:
+                print(f"Error fetching from Pexels: {response.status_code}")
+                self.deck_urls = []
+                return
+
             data = response.json()
             photos = data.get('photos', [])
-            
+
             # If your random page was too high reset to page 1 and try again to prevent crashing.
             if not photos and self.page > 1:
                 print(f"Page {self.page} was empty. Resetting to page 1.")
                 self.page = 1
-                return self.shuffle_deck()
-            
+                continue
+
             self.deck_urls = [photo['src']['original'] for photo in photos]
             utils.random.shuffle(self.deck_urls)
             self.page += 1
-        else:
-            print(f"Error fetching from Pexels: {response.status_code}")
-            self.deck_urls = []
+            return
+
+        self.deck_urls = []
 
     def next_image(self):
         """Get next URL from deck, download it, and return its local Path."""
-        if not self.deck_urls:
-            self.shuffle_deck()
-        
-        img_url = self.deck_urls.pop()
-        response = requests.get(img_url)
-        if response.status_code == 200:
+        while True:
+            if not self.deck_urls:
+                self.shuffle_deck()
+            if not self.deck_urls:
+                return None
+
+            img_url = self.deck_urls.pop()
+            try:
+                response = self.session.get(img_url, timeout=config.DOWNLOAD_TIMEOUT)
+            except requests.RequestException as exc:
+                print(f"Failed to download image: {exc}")
+                continue
+
+            if response.status_code != 200:
+                print(f"Failed to download image. Status: {response.status_code}")
+                continue
+
             # Save it to a temporary file with a .jpg extension
             # so utils.py knows how to load it.
             tmp = tempfile.NamedTemporaryFile(
@@ -90,9 +112,5 @@ class PexelsImageDeck:
             )
             tmp.write(response.content)
             tmp.close()
-            
+
             return utils.Path(tmp.name)
-        else:
-            print(f"Failed to download image. Status: {response.status_code}")
-            # If download fails, try the next one recursively
-            return self.next_image()

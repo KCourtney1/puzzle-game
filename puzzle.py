@@ -1,26 +1,31 @@
-import pygame
+import bisect
 import random
+import pygame
 import config
-import ui
 
 class Puzzle:
-    def __init__(self, preloaded_media, font, current_volume, volume_callback):
+    def __init__(self, preloaded_media, puzzle_area):
         self.frames, self.durations, self.audio_path, self.source_path = preloaded_media
-        
+        self.puzzle_area = puzzle_area
         self.img_width, self.img_height = self.frames[0].get_size()
         self.tile_w = self.img_width // config.GRID_SIZE
         self.tile_h = self.img_height // config.GRID_SIZE
 
-        self.screen = pygame.display.set_mode((config.MAX_WINDOW_SIZE + config.SIDEBAR_WIDTH, config.MAX_WINDOW_SIZE))
-        self.offset_x = config.SIDEBAR_WIDTH + (config.MAX_WINDOW_SIZE - self.img_width) // 2
-        self.offset_y = (config.MAX_WINDOW_SIZE - self.img_height) // 2
+        self.offset_x = puzzle_area.x + (puzzle_area.width - self.img_width) // 2
+        self.offset_y = puzzle_area.y + (puzzle_area.height - self.img_height) // 2
+        self.puzzle_rect = pygame.Rect(
+            self.offset_x,
+            self.offset_y,
+            self.tile_w * config.GRID_SIZE,
+            self.tile_h * config.GRID_SIZE,
+        )
+        self.frame_starts = self._build_frame_starts()
+        self.total_animation_ms = max(
+            self.frame_starts[-1] + max(1, int(self.durations[-1])),
+            1,
+        )
 
         self.tiles = self._create_tiles()
-
-        self.button_win = ui.Button(config.WIN_BUTTON_X, config.WIN_BUTTON_Y, config.WIN_BUTTON_WIDTH, config.WIN_BUTTON_HEIGHT, "Next Puzzle", font, config.TEXT_COLOR, config.WIN_BUTTON_COLOR, config.WIN_BUTTON_PRESS_COLOR, config.WIN_BUTTON_BORDER, 10)
-        self.button_skip = ui.Button(config.SKIP_BUTTON_X, config.SKIP_BUTTON_Y, config.SKIP_BUTTON_WIDTH, config.SKIP_BUTTON_HEIGHT, "Skip", font, config.TEXT_COLOR, config.SKIP_BUTTON_COLOR, config.SKIP_BUTTON_PRESS_COLOR, config.SKIP_BUTTON_BORDER)
-        self.button_save = ui.Button(config.SAVE_BUTTON_X, config.SAVE_BUTTON_Y, config.SAVE_BUTTON_WIDTH, config.SAVE_BUTTON_HEIGHT, "Save", font, config.TEXT_COLOR, config.SAVE_BUTTON_COLOR, config.SAVE_BUTTON_PRESS_COLOR, config.SAVE_BUTTON_BORDER)
-        self.slider = ui.VolumeSlider(config.SLIDER_X, config.SLIDER_Y, config.SLIDER_WIDTH, config.SLIDER_HEIGHT, current_volume, volume_callback)
 
     def _create_tiles(self):
         """Private helper to chop up the image and shuffle the tiles."""
@@ -42,6 +47,14 @@ class Puzzle:
             
         return tiles
 
+    def _build_frame_starts(self):
+        frame_starts = []
+        elapsed_ms = 0
+        for duration in self.durations:
+            frame_starts.append(elapsed_ms)
+            elapsed_ms += max(1, int(duration))
+        return frame_starts
+
     def swap_tiles(self, tile1, tile2):
         """Swaps two tiles and triggers their flash animations."""
         old_pos = tile1.current_pos
@@ -56,6 +69,29 @@ class Puzzle:
         """Checks if all tiles are in their correct positions."""
         return all(t.is_correct() for t in self.tiles)
 
+    def frame_index_for_time(self, elapsed_ms):
+        wrapped_ms = elapsed_ms % self.total_animation_ms
+        return max(0, bisect.bisect_right(self.frame_starts, wrapped_ms) - 1)
+
+    def frame_start_ms(self, frame_index):
+        clamped_index = max(0, min(frame_index, len(self.frame_starts) - 1))
+        return self.frame_starts[clamped_index]
+
+    def tile_at_position(self, col, row, exclude_tile=None):
+        for tile in self.tiles:
+            if tile is exclude_tile:
+                continue
+            if tile.current_pos == (col, row):
+                return tile
+        return None
+
+    def draw(self, screen, dragged_tile, frame_index):
+        for tile in self.tiles:
+            if tile is not dragged_tile:
+                tile.draw(screen, False, frame_index)
+        if dragged_tile:
+            dragged_tile.draw(screen, True, frame_index)
+
 class Tile:
     def __init__(self, tile_frames, col, row):
         self.tile_frames = tile_frames
@@ -68,10 +104,20 @@ class Tile:
         self.offset_y = 0
 
         self.rect = pygame.Rect((col * self.tile_w), (row * self.tile_h), self.tile_w, self.tile_h)
-        self.flash_surf = pygame.Surface((self.rect.width, self.rect.height), pygame.SRCALPHA)
-        self.border_surf = pygame.Surface((self.rect.width, self.rect.height),pygame.SRCALPHA)
+        self.border_surf = self._build_border_surface()
+        self.correct_flash_surf = self._build_flash_surface(config.CORRECT_FLASH_BORDER_COLOR)
+        self.incorrect_flash_surf = self._build_flash_surface(config.INCORRECT_FLASH_BORDER_COLOR)
         self.flash_timer = 0
-        
+
+    def _build_border_surface(self):
+        border_surf = pygame.Surface((self.rect.width, self.rect.height), pygame.SRCALPHA)
+        pygame.draw.rect(border_surf, config.TILE_BORDER_COLOR, border_surf.get_rect(), 2)
+        return border_surf
+
+    def _build_flash_surface(self, color):
+        flash_surf = pygame.Surface((self.rect.width, self.rect.height), pygame.SRCALPHA)
+        pygame.draw.rect(flash_surf, color, flash_surf.get_rect())
+        return flash_surf
 
     def move_to(self, col, row):
         self.current_pos = (col, row)
@@ -94,17 +140,12 @@ class Tile:
 
         # Only draw the grid border if it's NOT correct
         if not is_correct:
-            pygame.draw.rect(self.border_surf, config.TILE_BORDER_COLOR, self.border_surf.get_rect(), 2)
             screen.blit(self.border_surf, self.rect.topleft)
 
         # Handle the "Snap" flash overlay
         if self.flash_timer > 0:
-            if is_correct:
-                flash_color = config.CORRECT_FLASH_BORDER_COLOR
-            else:
-                flash_color = config.INCORRECT_FLASH_BORDER_COLOR
-            pygame.draw.rect(self.flash_surf, flash_color, self.flash_surf.get_rect())
-            screen.blit(self.flash_surf, self.rect.topleft)
+            flash_surf = self.correct_flash_surf if is_correct else self.incorrect_flash_surf
+            screen.blit(flash_surf, self.rect.topleft)
 
         # Draw Outer Borders (Drag or Flash)
         if is_dragged:

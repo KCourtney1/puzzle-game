@@ -10,17 +10,17 @@ WINDOW_WIDTH = MAX_WINDOW_SIZE + SIDEBAR_WIDTH
 WINDOW_HEIGHT = MAX_WINDOW_SIZE
 GRID_SIZE = 4
 
-FPS = 600
-FLASH_TIME = FPS//10
+FPS = 120
+FLASH_TIME = max(1, FPS // 10)
 MAX_VIDEO_FRAMES = 15000
+NETWORK_TIMEOUT = 20
+DOWNLOAD_TIMEOUT = 30
 
 VALID_EXT = {'.png', '.jpg', '.jpeg', '.gif', '.mp4'}
-CUSTOM_PATH = None  #"D:\\random\\images"
+CUSTOM_PATH = None #"D:\\random\\images"
 
 # --- API Configuration ---
 PEXELS_API_KEY = os.getenv("PEXELS_API_KEY")
-R34_API_KEY = os.getenv("R34_API_KEY")
-R34_USER_ID = os.getenv("R34_USER_ID")
 
 
 
