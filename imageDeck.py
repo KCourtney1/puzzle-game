@@ -5,8 +5,12 @@ import urllib.parse
 import config
 
 class LocalImageDeck:
-    def __init__(self):
-        image_dir = utils.Path(__file__).parent.resolve() / "images"
+    def __init__(self, custom_path=None):
+        if config.CUSTOM_PATH:
+            image_dir = utils.Path(config.CUSTOM_PATH).resolve()
+        else:
+            image_dir = utils.Path(__file__).parent.resolve() / "images"
+
         self.all_images = [
             f for f in image_dir.iterdir()
             if f.is_file() and f.suffix.lower() in config.VALID_EXT
@@ -34,7 +38,8 @@ class PexelsImageDeck:
         self.per_page = per_page
         self.headers = {"Authorization": config.PEXELS_API_KEY}
         self.deck_urls = []
-        self.page = 1
+
+        self.page = utils.random.randint(1, 100)
 
         game_dir = utils.Path(__file__).parent.resolve()
         self.temp_dir = game_dir / "temp" / "temp_pexels"
@@ -46,7 +51,7 @@ class PexelsImageDeck:
         """Fetch a new page of images from Pexels and shuffle them."""
         
         if self.query:
-            url = f"https://api.pexels.com/v1/search?query={self.query}&per_page={self.per_page}&page={self.page}"
+            url = f"https://api.pexels.com/v1/search?query={self.query}&per_page={self.per_page}&page={self.page}&size=large"
         else:
             url = f"https://api.pexels.com/v1/curated?per_page={self.per_page}&page={self.page}"
         
@@ -55,16 +60,18 @@ class PexelsImageDeck:
             data = response.json()
             photos = data.get('photos', [])
             
-            # full-resolution image
+            # If your random page was too high reset to page 1 and try again to prevent crashing.
+            if not photos and self.page > 1:
+                print(f"Page {self.page} was empty. Resetting to page 1.")
+                self.page = 1
+                return self.shuffle_deck()
+            
             self.deck_urls = [photo['src']['original'] for photo in photos]
             utils.random.shuffle(self.deck_urls)
-            self.page += 1  # Increment so the next shuffle gets fresh images
+            self.page += 1
         else:
             print(f"Error fetching from Pexels: {response.status_code}")
             self.deck_urls = []
-
-        if not self.deck_urls:
-            raise ValueError("No images found from Pexels! Check your API key or query.")
 
     def next_image(self):
         """Get next URL from deck, download it, and return its local Path."""

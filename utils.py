@@ -186,8 +186,11 @@ def save_to_local(source_path):
     if not source_path:
         return False
     
-    game_dir = Path(__file__).parent.resolve()
-    save_dir = game_dir / "images"
+    if config.CUSTOM_PATH:
+        save_dir = Path(config.CUSTOM_PATH).resolve()
+    else:
+        game_dir = Path(__file__).parent.resolve()
+        save_dir = game_dir / "images"
     save_dir.mkdir(parents=True, exist_ok=True)
 
     if save_dir in source_path.resolve().parents:

@@ -15,6 +15,7 @@ FLASH_TIME = FPS//10
 MAX_VIDEO_FRAMES = 15000
 
 VALID_EXT = {'.png', '.jpg', '.jpeg', '.gif', '.mp4'}
+CUSTOM_PATH = None  #"D:\\random\\images"
 
 # --- API Configuration ---
 PEXELS_API_KEY = os.getenv("PEXELS_API_KEY")

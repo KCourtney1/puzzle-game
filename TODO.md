@@ -6,4 +6,4 @@
 - [ ] steam videos instead of loading them into MEM
 
 # Bugs to Fix
-- [ ] HERE
+- [ ] redgifs tag search doesn't work
