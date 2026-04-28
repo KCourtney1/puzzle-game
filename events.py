@@ -1,12 +1,13 @@
 import utils
 import config
+import queue
 
 def handle_events(puzzle, state, preload_queue, job_q, deck):
     for event in utils.pygame.event.get():
         if event.type == utils.pygame.QUIT:
             state["running"] = False
 
-        if puzzle.slider.handle_event(event):
+        if puzzle.audio_path and puzzle.slider.handle_event(event):
             continue
 
         if puzzle.button_save.handle_event(event):
@@ -14,6 +15,61 @@ def handle_events(puzzle, state, preload_queue, job_q, deck):
             if success: print(f"Saved {puzzle.source_path.name} to local images!")
             else: print("Media is already local or failed to save.")
             continue
+        
+        search_box = state.get("search_box")
+        if search_box and search_box.handle_event(event):
+            new_query = search_box.text.strip()
+            print(f"Updating search query to: '{new_query}'")
+            
+            # Clear old queued images safely
+            try:
+                while True: job_q.get_nowait()
+            except queue.Empty: pass
+            
+            try:
+                while True: preload_queue.get_nowait()
+            except queue.Empty: pass
+
+            # Re-initialize the deck based on the current deck's class type
+            current_deck = state["deck"]
+            deck_type = type(current_deck)
+            
+            try:
+                if deck_type.__name__ == "LocalImageDeck":
+                    print("Local deck doesn't support queries.")
+                    new_deck = current_deck
+                else:
+                    new_deck = deck_type(query=new_query if new_query else None)
+                
+                # Assign the new deck and force a skip to grab the new images
+                state["deck"] = new_deck
+                _trigger_next_puzzle(puzzle, state, preload_queue)
+                job_q.put(new_deck)
+            except Exception as e:
+                print(f"Failed to load new deck: {e}")
+            continue
+
+        seek_bar = state.get("seek_bar")
+        if seek_bar and len(puzzle.frames) > 1:
+            progress = seek_bar.handle_event(event)
+            if progress is not None:
+                # Calculate the exact frame the user dragged to
+                target_frame = int(progress * (len(puzzle.frames) - 1))
+                state["current_frame"] = target_frame
+                
+                # If they just released the mouse button, finalize the audio seek
+                if event.type == utils.pygame.MOUSEBUTTONUP and event.button == 1:
+                    state["is_dragging_seek"] = False
+                    if puzzle.audio_path:
+                        # Find exactly how many milliseconds into the video this frame is
+                        target_time_ms = sum(puzzle.durations[:target_frame])
+                        state["audio_offset_ms"] = target_time_ms
+                        # Restart audio at the new position
+                        utils.pygame.mixer.music.play(-1, start=target_time_ms / 1000.0)
+                else:
+                    # Keep animation frozen while actively dragging
+                    state["is_dragging_seek"] = True
+                continue
 
         if state["puzzle_solved"]:
             if puzzle.button_win.handle_event(event):
