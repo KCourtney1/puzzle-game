@@ -8,6 +8,8 @@ import os
 import shutil
 import random
 
+from media_asset import EagerMediaAsset, StreamingVideoAsset
+
 
 class MediaLoadError(Exception):
     def __init__(self, message, retryable=False):
@@ -19,9 +21,9 @@ def clamp(val, low, high):
     return max(low, min(val, high))
 
 def get_scaled_size(width, height):
-    """Scale relative to the MAX_WINDOW_SIZE (the puzzle area), not the whole screen while maintaining aspect ratio"""
-    scale = min(config.MAX_WINDOW_SIZE / width, config.MAX_WINDOW_SIZE / height, 1.0)
-    return int(width * scale), int(height * scale)
+    """Scale to the usable puzzle canvas while maintaining aspect ratio."""
+    scale = min(config.PUZZLE_AREA_WIDTH / width, config.PUZZLE_AREA_HEIGHT / height)
+    return max(1, round(width * scale)), max(1, round(height * scale))
 
 def create_button(pos_x, pos_y, button_width, button_height):
     return pygame.Rect(
@@ -71,14 +73,21 @@ def cleanup_audio(audio_path):
         except PermissionError:
             print("Audio still locked, skipping delete.")
 
-def load_media(deck):
+def load_media(deck, status_callback=None):
+    if status_callback:
+        status_callback("Downloading Next Media...")
+
     path = deck.next_image()
     if path is None:
         return None
+    if status_callback:
+        status_callback("Loading Next Media...")
+        
     ext = path.suffix.lower()
-
     if ext == '.gif':
         return load_gif(path)
+    elif ext == '.webp':
+        return load_webp(path)
     elif ext == '.mp4':
         return load_video(path)
     return load_img(path)
@@ -89,7 +98,7 @@ def load_img(path):
     new_w, new_h = get_scaled_size(img.get_width(), img.get_height())
     if (new_w, new_h) != img.get_size():
         img = pygame.transform.smoothscale(img, (new_w, new_h))
-    return [img], [100], None, path
+    return EagerMediaAsset([img], [100], None, path)
 
 def load_gif(path):
     frames = []
@@ -115,16 +124,58 @@ def load_gif(path):
             pil_img.seek(pil_img.tell() + 1)
     except EOFError:
         pass
-    return frames, durations, None, path
+    return EagerMediaAsset(frames, durations, None, path)
 
-def load_video(path):
+def _pil_frame_to_surface(frame_rgba, target_size):
+    pygame_image = pygame.image.fromstring(
+        frame_rgba.tobytes(),
+        frame_rgba.size,
+        "RGBA"
+    )
+
+    if target_size != pygame_image.get_size():
+        pygame_image = pygame.transform.smoothscale(pygame_image, target_size)
+
+    return pygame_image
+
+def load_webp(path):
     frames = []
     durations = []
+    pil_img = Image.open(path)
+
+    new_w, new_h = get_scaled_size(pil_img.width, pil_img.height)
+    target_size = (new_w, new_h)
+
+    frame_count = getattr(pil_img, "n_frames", 1)
+    if frame_count <= 1 and not getattr(pil_img, "is_animated", False):
+        frame_rgba = pil_img.convert("RGBA")
+        pygame_image = _pil_frame_to_surface(frame_rgba, target_size)
+        return EagerMediaAsset([pygame_image], [100], None, path)
+
+    try:
+        while True:
+            duration = pil_img.info.get("duration", 100)
+            frame_rgba = pil_img.convert("RGBA")
+            pygame_image = _pil_frame_to_surface(frame_rgba, target_size)
+            frames.append(pygame_image)
+            durations.append(duration)
+            pil_img.seek(pil_img.tell() + 1)
+    except EOFError:
+        pass
+
+    if not frames:
+        frame_rgba = pil_img.convert("RGBA")
+        pygame_image = _pil_frame_to_surface(frame_rgba, target_size)
+        return EagerMediaAsset([pygame_image], [100], None, path)
+
+    return EagerMediaAsset(frames, durations, None, path)
+
+def load_video(path):
     audio_path = None
 
     cap = cv2.VideoCapture(str(path))
     fps = cap.get(cv2.CAP_PROP_FPS)
-    frame_duration = 1000/fps if fps > 0 else 33
+    frame_duration = 1000 / fps if fps > 0 else 33
 
     total_frames_available = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     if total_frames_available <= 0: 
@@ -132,6 +183,12 @@ def load_video(path):
 
     frames_to_extract = min(total_frames_available, config.MAX_VIDEO_FRAMES)
     video_length_seconds = frames_to_extract / fps if fps > 0 else 5.0
+
+    orig_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    orig_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    cap.release()
+
+    new_w, new_h = get_scaled_size(orig_w, orig_h)
     try:
         from moviepy import VideoFileClip
 
@@ -160,36 +217,21 @@ def load_video(path):
     except Exception as e:
         print(f"Audio extraction failed: {e}")
 
-    orig_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    orig_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    new_w, new_h = get_scaled_size(orig_w, orig_h)
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break #video over
-
-        if (new_w, new_h) != (orig_w, orig_h):
-            frame = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
-
-        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        pygame_image = pygame.image.frombytes(
-            frame_rgb.tobytes(),
-            (new_w, new_h),
-            "RGB"
-        )
-        
-        frames.append(pygame_image)
-        durations.append(frame_duration)
-        if len(frames) >= config.MAX_VIDEO_FRAMES:
-            break
-    cap.release()
-
-    if not frames:
+    if orig_w <= 0 or orig_h <= 0:
         surf = pygame.Surface((400, 400))
-        surf.fill((255, 0, 0)) # Red square fallback
-        return [surf], [100], None, path
-    
-    return frames, durations, audio_path, path
+        surf.fill((255, 0, 0))
+        return EagerMediaAsset([surf], [100], None, path)
+
+    return StreamingVideoAsset(
+        video_path=path,
+        audio_path=audio_path,
+        width=new_w,
+        height=new_h,
+        frame_count=frames_to_extract,
+        frame_duration_ms=frame_duration,
+        native_width=orig_w,
+        native_height=orig_h,
+    )
 
 def save_to_local(source_path):
     if not source_path:

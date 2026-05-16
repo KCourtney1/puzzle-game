@@ -5,6 +5,8 @@ import config
 import pygame
 
 _loading_overlay_cache = {}
+_seek_preview_surface_cache = {}  # (frame_index, src_w, src_h) -> scaled Surface
+_chrome_label_cache = {}  # deck_label -> (meta_surf, title_surf)
 
 
 @dataclass
@@ -12,20 +14,40 @@ class GameUI:
     next_button: "Button"
     skip_button: "Button"
     save_button: "Button"
+    menu_button: "Button"
     volume_slider: "VolumeSlider"
     search_box: "TextBox"
     seek_bar: "SeekBar"
+    title_font: object
+    meta_font: object
+
+
+@dataclass
+class MenuUI:
+    deck_cards: list["DeckCard"]
+    start_button: "Button"
+    decks_tab_btn: "Button"
+    options_tab_btn: "Button"
+    tasks_tab_btn: "Button"
+    title_font: object
+    subtitle_font: object
+    body_font: object
 
 
 def create_game_ui(font, on_volume_change, initial_volume):
+    button_font = pygame.font.SysFont(None, 34)
+    input_font = pygame.font.SysFont(None, 30)
+    title_font = pygame.font.SysFont(None, 38)
+    meta_font = pygame.font.SysFont(None, 24)
+    next_text = "Next" if config.GRID_SIZE == 1 else "Next Puzzle"
     return GameUI(
         next_button=Button(
             config.WIN_BUTTON_X,
             config.WIN_BUTTON_Y,
             config.WIN_BUTTON_WIDTH,
             config.WIN_BUTTON_HEIGHT,
-            "Next Puzzle",
-            font,
+            next_text,
+            button_font,
             config.TEXT_COLOR,
             config.WIN_BUTTON_COLOR,
             config.WIN_BUTTON_PRESS_COLOR,
@@ -38,7 +60,7 @@ def create_game_ui(font, on_volume_change, initial_volume):
             config.SKIP_BUTTON_WIDTH,
             config.SKIP_BUTTON_HEIGHT,
             "Skip",
-            font,
+            button_font,
             config.TEXT_COLOR,
             config.SKIP_BUTTON_COLOR,
             config.SKIP_BUTTON_PRESS_COLOR,
@@ -50,11 +72,23 @@ def create_game_ui(font, on_volume_change, initial_volume):
             config.SAVE_BUTTON_WIDTH,
             config.SAVE_BUTTON_HEIGHT,
             "Save",
-            font,
+            button_font,
             config.TEXT_COLOR,
             config.SAVE_BUTTON_COLOR,
             config.SAVE_BUTTON_PRESS_COLOR,
             config.SAVE_BUTTON_BORDER,
+        ),
+        menu_button=Button(
+            config.MENU_BUTTON_X,
+            config.MENU_BUTTON_Y,
+            config.MENU_BUTTON_WIDTH,
+            config.MENU_BUTTON_HEIGHT,
+            "Main Menu",
+            button_font,
+            config.TEXT_COLOR,
+            config.MENU_BUTTON_COLOR,
+            config.MENU_BUTTON_PRESS_COLOR,
+            config.MENU_BUTTON_BORDER,
         ),
         volume_slider=VolumeSlider(
             config.SLIDER_X,
@@ -69,7 +103,7 @@ def create_game_ui(font, on_volume_change, initial_volume):
             config.TEXTBOX_Y,
             config.TEXTBOX_WIDTH,
             config.TEXTBOX_HEIGHT,
-            font,
+            input_font,
         ),
         seek_bar=SeekBar(
             config.SEEKBAR_X,
@@ -77,7 +111,144 @@ def create_game_ui(font, on_volume_change, initial_volume):
             config.SEEKBAR_WIDTH,
             config.SEEKBAR_HEIGHT,
         ),
+        title_font=title_font,
+        meta_font=meta_font,
     )
+
+def create_menu_ui(deck_specs):
+    title_font = pygame.font.SysFont(None, 76)
+    subtitle_font = pygame.font.SysFont(None, 34)
+    body_font = pygame.font.SysFont(None, 28)
+    card_title_font = pygame.font.SysFont(None, 36)
+    card_body_font = pygame.font.SysFont(None, 26)
+    tab_font = pygame.font.SysFont(None, 36)
+
+    deck_cards = []
+    for index, spec in enumerate(deck_specs):
+        row = index // 2
+        col = index % 2
+        x = config.MENU_GRID_X + col * (config.MENU_CARD_WIDTH + config.MENU_CARD_GAP)
+        y = config.MENU_GRID_Y + config.MENU_CARD_GAP + row * (config.MENU_CARD_HEIGHT + config.MENU_CARD_GAP)
+        deck_cards.append(
+            DeckCard(
+                x,
+                y,
+                config.MENU_CARD_WIDTH,
+                config.MENU_CARD_HEIGHT,
+                spec.key,
+                spec.label,
+                spec.description,
+                spec.supports_search,
+                card_title_font,
+                card_body_font,
+            )
+        )
+
+    decks_tab_btn = Button(
+        config.MENU_GRID_X, config.TAB_Y, config.TAB_W, config.TAB_H, "Decks", tab_font,
+        config.TEXT_COLOR, config.MENU_CARD_COLOR, config.MENU_CARD_PRESS_COLOR, config.MENU_CARD_BORDER
+    )
+
+    tasks_tab_btn = Button(
+        config.MENU_GRID_X + config.TAB_W + 20, config.TAB_Y, config.TAB_W, config.TAB_H, "Tasks", tab_font,
+        config.TEXT_COLOR, config.MENU_CARD_COLOR, config.MENU_CARD_PRESS_COLOR, config.MENU_CARD_BORDER
+    )
+
+    options_tab_btn = Button(
+        config.MENU_GRID_X + (2 *  config.TAB_W) + 40, config.TAB_Y, config.TAB_W, config.TAB_H, "Options", tab_font,
+        config.TEXT_COLOR, config.MENU_CARD_COLOR, config.MENU_CARD_PRESS_COLOR, config.MENU_CARD_BORDER
+    )
+    
+    return MenuUI(
+        deck_cards=deck_cards,
+        start_button=Button(
+            config.MENU_INFO_X,
+            config.MENU_START_MIN_Y,
+            240,
+            58,
+            "Start Puzzle",
+            body_font,
+            config.TEXT_COLOR,
+            config.MENU_START_BUTTON_COLOR,
+            config.MENU_START_BUTTON_PRESS_COLOR,
+            config.MENU_START_BUTTON_BORDER,
+        ),
+        decks_tab_btn=decks_tab_btn,
+        options_tab_btn=options_tab_btn,
+        tasks_tab_btn=tasks_tab_btn,
+        title_font=title_font,
+        subtitle_font=subtitle_font,
+        body_font=body_font,
+    )
+
+
+class DeckCard:
+    def __init__(self, x, y, width, height, key, title, description, supports_search, title_font, body_font):
+        self.rect = pygame.Rect(x, y, width, height)
+        self.key = key
+        self.title = title
+        self.description = description
+        self.supports_search = supports_search
+        self.title_font = title_font
+        self.body_font = body_font
+        self.content_width = self.rect.width - 36
+        self.title_surf = self.title_font.render(self.title, True, config.TEXT_COLOR)
+        self.description_surfs = [
+            self.body_font.render(line, True, config.MENU_SUBTEXT_COLOR)
+            for line in _fit_wrapped_lines(self.body_font, self.description, self.content_width, 2)
+        ]
+        footer_text = "Search in sidebar" if self.supports_search else "Local folder deck"
+        footer_line = _fit_wrapped_lines(self.body_font, footer_text, self.content_width, 1)[0]
+        self.footer_surf = self.body_font.render(footer_line, True, config.MENU_SUBTEXT_COLOR)
+
+        self.is_pressed = False
+        self.is_hovered = False
+        self.cooldown_ms = 100
+        self.last_click_time = 0
+
+    def handle_event(self, event):
+        if event.type == pygame.MOUSEMOTION:
+            self.is_hovered = self.rect.collidepoint(event.pos)
+            return False
+
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if self.rect.collidepoint(event.pos):
+                current_time = pygame.time.get_ticks()
+                if current_time - self.last_click_time >= self.cooldown_ms:
+                    self.last_click_time = current_time
+                    self.is_pressed = True
+                    self.is_hovered = True
+                    return True
+            return False
+
+        if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+            self.is_pressed = False
+
+        return False
+
+    def draw(self, screen, selected=False):
+        if self.is_pressed:
+            fill_color = config.MENU_CARD_PRESS_COLOR
+        elif selected:
+            fill_color = config.MENU_CARD_SELECTED_COLOR
+        elif self.is_hovered:
+            fill_color = config.MENU_CARD_HOVER_COLOR
+        else:
+            fill_color = config.MENU_CARD_COLOR
+
+        border_color = config.MENU_CARD_SELECTED_BORDER if selected else config.MENU_CARD_BORDER
+
+        pygame.draw.rect(screen, fill_color, self.rect, border_radius=8)
+        pygame.draw.rect(screen, border_color, self.rect, 2, border_radius=8)
+
+        text_clip_rect = self.rect.inflate(-12, -12)
+        screen.set_clip(text_clip_rect)
+        screen.blit(self.title_surf, (self.rect.x + 18, self.rect.y + 18))
+        for index, surf in enumerate(self.description_surfs):
+            screen.blit(surf, (self.rect.x + 18, self.rect.y + 62 + (index * 24)))
+        screen.blit(self.footer_surf, (self.rect.x + 18, self.rect.bottom - 34))
+        screen.set_clip(None)
+
 
 class Button:
     def __init__(self, x, y, width, height, text, font, text_color, base_color, press_color, border_color, border_radius=8, cooldown_ms=100):
@@ -96,6 +267,10 @@ class Button:
         self.cooldown_ms = cooldown_ms
         self.last_click_time = 0
         self.text_surf = self.font.render(self.text, True, self.text_color)
+        self.text_rect = self.text_surf.get_rect(center=self.rect.center)
+
+    def set_position(self, x, y):
+        self.rect.topleft = (x, y)
         self.text_rect = self.text_surf.get_rect(center=self.rect.center)
     
     def handle_event(self, event):
@@ -136,6 +311,9 @@ class VolumeSlider:
         self.font = pygame.font.SysFont(None, 28)
         self._label_pct = None
         self._label_surf = None
+
+    def set_position(self, x, y):
+        self.rect.topleft = (x, y)
     
     def handle_event(self, event):
         """Processes events and returns True if the slider interacted with it."""
@@ -208,6 +386,22 @@ class TextBox:
         self.cursor_timer = 0
         self.cursor_interval = 500
         self.display_offset = 0 # For horizontal scrolling of long text
+        self._cached_text = None
+        self._cached_text_surf = None
+
+    def set_text(self, text):
+        self.text = text or ''
+        self.cursor_pos = len(self.text)
+        self.selection_start = None
+        self.display_offset = 0
+        self.active = False
+        self.color = self.color_inactive
+
+    def set_title(self, title):
+        self.title_surf = self.title_font.render(title, True, config.TEXT_COLOR)
+
+    def set_position(self, x, y):
+        self.rect.topleft = (x, y)
 
     def _delete_selection(self):
         """Deletes the currently selected text. Returns True if text was deleted."""
@@ -345,7 +539,10 @@ class TextBox:
         pygame.draw.rect(screen, self.bg_color, self.rect, border_radius=5)
         pygame.draw.rect(screen, self.color, self.rect, 2, border_radius=5)
         
-        text_surface = self.font.render(self.text, True, config.TEXT_COLOR)
+        if self.text != self._cached_text:
+            self._cached_text = self.text
+            self._cached_text_surf = self.font.render(self.text, True, config.TEXT_COLOR)
+        text_surface = self._cached_text_surf
         
         # --- Camera/Scroll Logic ---
         text_width = text_surface.get_width()
@@ -448,28 +645,315 @@ class SeekBar:
         knob_y = self.rect.centery
         pygame.draw.circle(screen, config.SEEKBAR_KNOB_COLOR, (knob_x, knob_y), config.SLIDER_KNOB_RADIUS)
 
-def draw_loading_overlay(screen, font):
+def _wrap_text(font, text, max_width):
+    words = text.split()
+    lines = []
+    current_line = ""
+
+    for word in words:
+        trial_line = word if not current_line else f"{current_line} {word}"
+        if font.size(trial_line)[0] <= max_width:
+            current_line = trial_line
+        else:
+            if current_line:
+                lines.append(current_line)
+            current_line = word
+
+    if current_line:
+        lines.append(current_line)
+
+    return lines
+
+def _ellipsize_text(font, text, max_width):
+    if font.size(text)[0] <= max_width:
+        return text
+
+    trimmed = text
+    while trimmed and font.size(f"{trimmed}...")[0] > max_width:
+        trimmed = trimmed[:-1].rstrip()
+
+    return f"{trimmed}..." if trimmed else "..."
+
+def _fit_wrapped_lines(font, text, max_width, max_lines):
+    lines = _wrap_text(font, text, max_width)
+    if len(lines) <= max_lines:
+        return lines
+
+    fitted = lines[:max_lines - 1]
+    remaining = " ".join(lines[max_lines - 1:])
+    fitted.append(_ellipsize_text(font, remaining, max_width))
+    return fitted
+
+def layout_game_sidebar(controls, show_search, show_volume):
+    current_y = config.WIN_BUTTON_Y
+
+    controls.next_button.set_position(config.WIN_BUTTON_X, current_y)
+    controls.skip_button.set_position(config.SKIP_BUTTON_X, current_y)
+    current_y += config.WIN_BUTTON_HEIGHT + 14
+
+    controls.save_button.set_position(config.SAVE_BUTTON_X, current_y)
+    current_y += config.SAVE_BUTTON_HEIGHT
+
+    if show_search:
+        current_y += 14
+        controls.search_box.set_position(config.TEXTBOX_X, current_y + 20)
+        current_y = controls.search_box.rect.bottom
+
+    if show_volume:
+        current_y += 14
+        controls.volume_slider.set_position(config.SLIDER_X, current_y + 30)
+
+def _format_time_ms(ms):
+    total_seconds = max(0, int(ms // 1000))
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if hours > 0:
+        return f"{hours}:{minutes:02d}:{seconds:02d}"
+    return f"{minutes}:{seconds:02d}"
+
+def draw_seek_preview(screen, puzzle, controls, preview_frame):
+    preview_rect = pygame.Rect(
+        0,
+        0,
+        config.SEEK_PREVIEW_WIDTH,
+        config.SEEK_PREVIEW_HEIGHT + config.SEEK_PREVIEW_FOOTER_HEIGHT,
+    )
+    anchor_x = controls.seek_bar.rect.left + int(controls.seek_bar.progress * controls.seek_bar.rect.width)
+    preview_rect.midbottom = (anchor_x, controls.seek_bar.rect.top - config.SEEK_PREVIEW_GAP)
+
+    min_left = config.PUZZLE_PANEL_X + 14
+    max_right = config.PUZZLE_PANEL_X + config.PUZZLE_PANEL_WIDTH - 14
+    preview_rect.left = max(min_left, preview_rect.left)
+    preview_rect.right = min(max_right, preview_rect.right)
+    if preview_rect.left < min_left:
+        preview_rect.left = min_left
+    if preview_rect.right > max_right:
+        preview_rect.right = max_right
+
+    image_rect = pygame.Rect(
+        preview_rect.x,
+        preview_rect.y,
+        config.SEEK_PREVIEW_WIDTH,
+        config.SEEK_PREVIEW_HEIGHT,
+    )
+    footer_rect = pygame.Rect(
+        preview_rect.x,
+        preview_rect.bottom - config.SEEK_PREVIEW_FOOTER_HEIGHT,
+        config.SEEK_PREVIEW_WIDTH,
+        config.SEEK_PREVIEW_FOOTER_HEIGHT,
+    )
+
+    pygame.draw.rect(screen, config.MENU_PANEL_COLOR, preview_rect, border_radius=8)
+    pygame.draw.rect(screen, config.MENU_PANEL_BORDER, preview_rect, 2, border_radius=8)
+    pygame.draw.rect(screen, config.MENU_CARD_PRESS_COLOR, footer_rect, border_radius=8)
+
+    frame_surface = puzzle.peek_preview(preview_frame)
+    if frame_surface is None:
+        frame_surface = puzzle.peek_frame(preview_frame)
+    inset_rect = image_rect.inflate(-8, -8)
+    if frame_surface is not None:
+        src_w, src_h = frame_surface.get_size()
+        if src_w == inset_rect.width and src_h == inset_rect.height:
+            preview_surface_rect = frame_surface.get_rect(center=inset_rect.center)
+            screen.blit(frame_surface, preview_surface_rect)
+        else:
+            scale = min(inset_rect.width / src_w, inset_rect.height / src_h)
+            scaled_w = max(1, round(src_w * scale))
+            scaled_h = max(1, round(src_h * scale))
+            cache_key = (preview_frame, src_w, src_h)
+            preview_surface = _seek_preview_surface_cache.get(cache_key)
+            if preview_surface is None:
+                preview_surface = pygame.transform.smoothscale(frame_surface, (scaled_w, scaled_h))
+                # Keep cache small — only the most recent few frames matter
+                if len(_seek_preview_surface_cache) > 16:
+                    _seek_preview_surface_cache.pop(next(iter(_seek_preview_surface_cache)))
+                _seek_preview_surface_cache[cache_key] = preview_surface
+            preview_surface_rect = preview_surface.get_rect(center=inset_rect.center)
+            screen.blit(preview_surface, preview_surface_rect)
+    else:
+        pygame.draw.rect(screen, config.MENU_CARD_COLOR, inset_rect, border_radius=6)
+        loading_surf = controls.meta_font.render("Loading preview...", True, config.MENU_SUBTEXT_COLOR)
+        loading_rect = loading_surf.get_rect(center=inset_rect.center)
+        screen.blit(loading_surf, loading_rect)
+
+    timestamp = _format_time_ms(puzzle.frame_start_ms(preview_frame))
+    if puzzle.total_duration_ms > 0:
+        timestamp = f"{timestamp} / {_format_time_ms(puzzle.total_duration_ms)}"
+    time_surf = controls.meta_font.render(timestamp, True, config.TEXT_COLOR)
+    time_rect = time_surf.get_rect(center=footer_rect.center)
+    screen.blit(time_surf, time_rect)
+
+def draw_game_chrome(screen, controls, deck_label):
+    sidebar_rect = pygame.Rect(
+        config.SIDEBAR_PANEL_X,
+        config.SIDEBAR_PANEL_Y,
+        config.SIDEBAR_PANEL_WIDTH,
+        config.SIDEBAR_PANEL_HEIGHT,
+    )
+    puzzle_panel_rect = pygame.Rect(
+        config.PUZZLE_PANEL_X,
+        config.PUZZLE_PANEL_Y,
+        config.PUZZLE_PANEL_WIDTH,
+        config.PUZZLE_PANEL_HEIGHT,
+    )
+    footer_rect = pygame.Rect(
+        config.PUZZLE_PANEL_X + 1,
+        config.PUZZLE_PANEL_Y + config.PUZZLE_PANEL_HEIGHT - config.PUZZLE_FOOTER_HEIGHT,
+        config.PUZZLE_PANEL_WIDTH - 2,
+        config.PUZZLE_FOOTER_HEIGHT - 1,
+    )
+
+    pygame.draw.rect(screen, config.MENU_PANEL_COLOR, sidebar_rect, border_radius=8)
+    pygame.draw.rect(screen, config.MENU_PANEL_BORDER, sidebar_rect, 2, border_radius=8)
+    pygame.draw.rect(screen, config.MENU_PANEL_COLOR, puzzle_panel_rect, border_radius=8)
+    pygame.draw.rect(screen, config.MENU_PANEL_BORDER, puzzle_panel_rect, 2, border_radius=8)
+    pygame.draw.rect(screen, config.MENU_CARD_PRESS_COLOR, footer_rect, border_radius=8)
+    pygame.draw.line(
+        screen,
+        config.MENU_PANEL_BORDER,
+        (footer_rect.left + 16, footer_rect.top),
+        (footer_rect.right - 16, footer_rect.top),
+        2,
+    )
+
+    cached = _chrome_label_cache.get(deck_label)
+    if cached is None:
+        meta_surf = controls.meta_font.render("Current Deck", True, config.MENU_SUBTEXT_COLOR)
+        title_surf = controls.title_font.render(deck_label, True, config.TEXT_COLOR)
+        _chrome_label_cache.clear()  # only ever need one entry
+        _chrome_label_cache[deck_label] = (meta_surf, title_surf)
+    else:
+        meta_surf, title_surf = cached
+    screen.blit(meta_surf, (config.CONTROL_X, config.SIDEBAR_PANEL_Y + 18))
+    screen.blit(title_surf, (config.CONTROL_X, config.SIDEBAR_PANEL_Y + 42))
+    pygame.draw.line(
+        screen,
+        config.MENU_PANEL_BORDER,
+        (config.CONTROL_X, config.SIDEBAR_PANEL_Y + 94),
+        (config.CONTROL_X + config.CONTROL_WIDTH, config.SIDEBAR_PANEL_Y + 94),
+        2,
+    )
+
+def draw_main_menu(screen, menu_ui, state, deck_specs_by_key):
+    screen.fill(config.BG_MAIN)
+
+    divider_x = config.MENU_GRID_X - 32
+    left_panel_rect = pygame.Rect(32, 72, divider_x - 56, config.WINDOW_HEIGHT - 144)
+    left_content_rect = left_panel_rect.inflate(-28, -28)
+
+    pygame.draw.rect(screen, config.MENU_PANEL_COLOR, left_panel_rect, border_radius=8)
+    pygame.draw.rect(screen, config.MENU_PANEL_BORDER, left_panel_rect, 2, border_radius=8)
+    pygame.draw.line(screen, config.MENU_PANEL_BORDER, (divider_x, 72), (divider_x, config.WINDOW_HEIGHT - 72), 2)
+
+    selected_spec = deck_specs_by_key[state.selected_deck_key]
+    title_lines = _wrap_text(menu_ui.title_font, "Puzzle Decks", left_content_rect.width)
+    subtitle_lines = _wrap_text(
+        menu_ui.subtitle_font,
+        "Pick a source, then jump into a new board.",
+        left_content_rect.width,
+    )
+    selected_note_text = "Use the sidebar search box after starting." if selected_spec.supports_search else "Plays from your local folder without a search box filter."
+    description_lines = _wrap_text(menu_ui.body_font, selected_spec.description, left_content_rect.width)
+    note_lines = _wrap_text(menu_ui.body_font, selected_note_text, left_content_rect.width)
+
+    screen.set_clip(left_content_rect)
+
+    current_y = config.MENU_INFO_Y
+    for index, line in enumerate(title_lines):
+        line_surf = menu_ui.title_font.render(line, True, config.TEXT_COLOR)
+        screen.blit(line_surf, (config.MENU_INFO_X, current_y + (index * 62)))
+
+    current_y += len(title_lines) * 62 + 10
+    for index, line in enumerate(subtitle_lines):
+        line_surf = menu_ui.subtitle_font.render(line, True, config.MENU_SUBTEXT_COLOR)
+        screen.blit(line_surf, (config.MENU_INFO_X, current_y + (index * 34)))
+
+    current_y += len(subtitle_lines) * 34 + 38
+    selected_title = menu_ui.subtitle_font.render(selected_spec.label, True, config.TEXT_COLOR)
+    screen.blit(selected_title, (config.MENU_INFO_X, current_y))
+
+    current_y += 40
+    for index, line in enumerate(description_lines):
+        line_surf = menu_ui.body_font.render(line, True, config.MENU_SUBTEXT_COLOR)
+        screen.blit(line_surf, (config.MENU_INFO_X, current_y + (index * 28)))
+
+    note_start_y = current_y + (len(description_lines) * 28) + 4
+    for index, line in enumerate(note_lines):
+        line_surf = menu_ui.body_font.render(line, True, config.MENU_SUBTEXT_COLOR)
+        screen.blit(line_surf, (config.MENU_INFO_X, note_start_y + (index * 28)))
+
+    start_button_y = max(
+        config.MENU_START_MIN_Y,
+        note_start_y + (len(note_lines) * 28) + 24,
+    )
+    menu_ui.start_button.set_position(config.MENU_INFO_X, start_button_y)
+    menu_ui.start_button.draw(screen)
+
+    if state.menu_error:
+        status_y = menu_ui.start_button.rect.bottom + config.MENU_STATUS_SPACING
+        error_title = menu_ui.body_font.render("Could not start deck:", True, config.MENU_ERROR_COLOR)
+        screen.blit(error_title, (config.MENU_INFO_X, status_y))
+
+        error_lines = _wrap_text(menu_ui.body_font, state.menu_error, config.MENU_INFO_WIDTH)
+        for index, line in enumerate(error_lines[:4]):
+            line_surf = menu_ui.body_font.render(line, True, config.MENU_ERROR_COLOR)
+            screen.blit(line_surf, (config.MENU_INFO_X, status_y + 32 + (index * 28)))
+
+    screen.set_clip(None)
+
+    if state.menu_tab == "decks":
+        menu_ui.decks_tab_btn.base_color = config.MENU_CARD_SELECTED_COLOR
+        menu_ui.options_tab_btn.base_color = config.MENU_CARD_COLOR
+        menu_ui.tasks_tab_btn.base_color = config.MENU_CARD_COLOR
+    elif state.menu_tab == "options":
+        menu_ui.decks_tab_btn.base_color = config.MENU_CARD_COLOR
+        menu_ui.options_tab_btn.base_color = config.MENU_CARD_SELECTED_COLOR
+        menu_ui.tasks_tab_btn.base_color = config.MENU_CARD_COLOR
+    elif state.menu_tab == "tasks":
+        menu_ui.decks_tab_btn.base_color = config.MENU_CARD_COLOR
+        menu_ui.options_tab_btn.base_color = config.MENU_CARD_COLOR
+        menu_ui.tasks_tab_btn.base_color = config.MENU_CARD_SELECTED_COLOR
+
+    menu_ui.decks_tab_btn.draw(screen)
+    menu_ui.options_tab_btn.draw(screen)
+    menu_ui.tasks_tab_btn.draw(screen)
+
+    if state.menu_tab == "decks":
+        deck_subheader = menu_ui.body_font.render("Choose the feed you want to puzzle from.", True, config.MENU_SUBTEXT_COLOR)
+        screen.blit(deck_subheader, (config.MENU_GRID_X, config.MENU_GRID_Y - 20))
+        for card in menu_ui.deck_cards:
+            card.draw(screen, selected=card.key == state.selected_deck_key)
+    elif state.menu_tab == "options":
+        placeholder_text = menu_ui.body_font.render("Options will go here soon!", True, config.MENU_SUBTEXT_COLOR)
+        screen.blit(placeholder_text, (config.MENU_GRID_X, config.MENU_GRID_Y - 20))
+    elif state.menu_tab == "tasks":
+        placeholder_text = menu_ui.body_font.render("Tasks will go here soon!", True, config.MENU_SUBTEXT_COLOR)
+        screen.blit(placeholder_text, (config.MENU_GRID_X, config.MENU_GRID_Y - 20))
+    pygame.display.flip()
+
+def draw_loading_overlay(screen, font, status_text="Loading Next Media..."):
     """Draws an unobtrusive floating banner at the bottom of the puzzle area."""
-    cache_key = font.get_height()
+    cache_key = (font.get_height(), status_text)
     cached_surfaces = _loading_overlay_cache.get(cache_key)
+
     if cached_surfaces is None:
-        text_surf = font.render("Downloading Next Media...", True, config.TEXT_COLOR)
+        text_surf = font.render(status_text , True, config.TEXT_COLOR)
         padding_x = 40
         padding_y = 20
         box_width = text_surf.get_width() + padding_x
         box_height = text_surf.get_height() + padding_y
 
         box_surf = pygame.Surface((box_width, box_height), pygame.SRCALPHA)
-        pygame.draw.rect(box_surf, (30, 30, 35, 200), box_surf.get_rect(), border_radius=15)
-        pygame.draw.rect(box_surf, config.SKIP_BUTTON_BORDER, box_surf.get_rect(), 2, border_radius=15)
+        pygame.draw.rect(box_surf, (30, 32, 37, 220), box_surf.get_rect(), border_radius=15)
+        pygame.draw.rect(box_surf, config.MENU_PANEL_BORDER, box_surf.get_rect(), 2, border_radius=15)
         _loading_overlay_cache[cache_key] = (box_surf, text_surf)
         cached_surfaces = (box_surf, text_surf)
 
     box_surf, text_surf = cached_surfaces
 
     # centered at bottom of puzzle area
-    center_x = config.SIDEBAR_WIDTH + (config.MAX_WINDOW_SIZE // 2)
-    center_y = 40
+    center_x = config.PUZZLE_PANEL_X + (config.PUZZLE_PANEL_WIDTH // 2)
+    center_y = config.PUZZLE_PANEL_Y + 34
     
     box_rect = box_surf.get_rect(center=(center_x, center_y))
     text_rect = text_surf.get_rect(center=box_rect.center)

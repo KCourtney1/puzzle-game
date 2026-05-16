@@ -1,13 +1,53 @@
 import utils
 import config
+import imageDeck
+import puzzle as puzzle_mod
 
-def handle_events(puzzle, state, controls, media_controller):
+def handle_menu_events(state, menu_ui):
     for event in utils.pygame.event.get():
         if event.type == utils.pygame.QUIT:
             state.running = False
+            return False
+
+        if event.type == utils.pygame.KEYDOWN and event.key in (utils.pygame.K_RETURN, utils.pygame.K_KP_ENTER):
+            return True
+
+        if menu_ui.decks_tab_btn.handle_event(event):
+            state.menu_tab = "decks"
+        if menu_ui.tasks_tab_btn.handle_event(event):
+            state.menu_tab = "tasks"
+        if menu_ui.options_tab_btn.handle_event(event):
+            state.menu_tab = "options"
+
+        if state.menu_tab == "decks":
+            for card in menu_ui.deck_cards:
+                if card.handle_event(event):
+                    state.selected_deck_key = card.key
+                    state.menu_error = None
+                    break
+        elif state.menu_tab == "options":
+            pass
+        elif state.menu_tab == "tasks":
+            pass
+
+        if menu_ui.start_button.handle_event(event):
+            return True
+    return False
+
+def handle_events(puzzle, state, controls, media_controller):
+    deck_spec = imageDeck.get_deck_spec_for_instance(state.deck)
+    search_supported = deck_spec.supports_search if deck_spec is not None else False
+
+    for event in utils.pygame.event.get():
+        if event.type == utils.pygame.QUIT:
+            state.running = False
+            return None
 
         if puzzle.audio_path and controls.volume_slider.handle_event(event):
             continue
+
+        if controls.menu_button.handle_event(event):
+            return "menu"
 
         if controls.save_button.handle_event(event):
             success = utils.save_to_local(puzzle.source_path)
@@ -15,7 +55,7 @@ def handle_events(puzzle, state, controls, media_controller):
             else: print("Media is already local or failed to save.")
             continue
 
-        if controls.search_box.handle_event(event):
+        if search_supported and controls.search_box.handle_event(event):
             search_box = controls.search_box
             new_query = search_box.text.strip()
             print(f"Updating search query to: '{new_query}'")
@@ -35,20 +75,37 @@ def handle_events(puzzle, state, controls, media_controller):
                 media_controller.replace_deck(new_deck)
                 media_controller.ensure_prefetch()
                 _trigger_next_puzzle(state, media_controller)
-            except Exception as e:
+            except BaseException as e:
+                if isinstance(e, (KeyboardInterrupt, SystemExit)):
+                    raise
                 print(f"Failed to load new deck: {e}")
             continue
 
-        if len(puzzle.frames) > 1:
+        if puzzle.is_animated:
             progress = controls.seek_bar.handle_event(event)
             if progress is not None:
                 # Calculate the exact frame the user dragged to
-                target_frame = int(progress * (len(puzzle.frames) - 1))
-                state.current_frame = target_frame
+                target_frame = int(progress * (puzzle.frame_count - 1))
+                state.seek_preview_frame = target_frame
+                puzzle.request_preview(
+                    target_frame,
+                    config.SEEK_PREVIEW_SHEET_BACKWARD_RADIUS,
+                    config.SEEK_PREVIEW_SHEET_FORWARD_RADIUS,
+                    immediate_on_jump=True,
+                )
 
                 # If they just released the mouse button, finalize the audio seek
                 if event.type == utils.pygame.MOUSEBUTTONUP and event.button == 1:
                     state.is_dragging_seek = False
+                    state.seek_preview_frame = None
+                    state.current_frame = target_frame
+                    state.anim_timer_ms = 0.0
+                    puzzle.prepare_frame(
+                        target_frame,
+                        config.SEEK_PREVIEW_PREFETCH_BACKWARD_RADIUS,
+                        config.SEEK_PREVIEW_PREFETCH_FORWARD_RADIUS,
+                        immediate_on_jump=True,
+                    )
                     if puzzle.audio_path:
                         # Find exactly how many milliseconds into the video this frame is
                         target_time_ms = puzzle.frame_start_ms(target_frame)
@@ -56,7 +113,6 @@ def handle_events(puzzle, state, controls, media_controller):
                         # Restart audio at the new position
                         utils.pygame.mixer.music.play(-1, start=target_time_ms / 1000.0)
                 else:
-                    # Keep animation frozen while actively dragging
                     state.is_dragging_seek = True
                 continue
 
@@ -68,6 +124,47 @@ def handle_events(puzzle, state, controls, media_controller):
             if controls.skip_button.handle_event(event):
                 _trigger_next_puzzle(state, media_controller)
                 continue
+
+        # --- Middle mouse: pan, zoom, reset ---
+        if event.type == utils.pygame.MOUSEBUTTONDOWN and event.button == 2:
+            if not puzzle.puzzle_area.collidepoint(event.pos):
+                continue
+            now = utils.pygame.time.get_ticks()
+            double_click = (now - state.last_middle_click_time) < 400
+            state.last_middle_click_time = now
+            if double_click:
+                puzzle.reset_view()
+            else:
+                state.is_panning = True
+                state.pan_mouse_x = event.pos[0]
+                state.pan_mouse_y = event.pos[1]
+            continue
+
+        if event.type == utils.pygame.MOUSEBUTTONUP and event.button == 2:
+            state.is_panning = False
+            continue
+
+        if event.type == utils.pygame.MOUSEMOTION and state.is_panning:
+            if not puzzle.puzzle_area.collidepoint(event.pos):
+                state.is_panning = False
+                continue
+            
+            dx = event.pos[0] - state.pan_mouse_x
+            dy = event.pos[1] - state.pan_mouse_y
+            state.pan_mouse_x = event.pos[0]
+            state.pan_mouse_y = event.pos[1]
+            puzzle.pan_x += dx
+            puzzle.pan_y += dy
+            puzzle.apply_view()
+            puzzle.clamp_pan()
+            continue
+
+        if event.type == utils.pygame.MOUSEWHEEL:
+            mouse_pos = utils.pygame.mouse.get_pos()
+            if puzzle.puzzle_area.collidepoint(mouse_pos):
+                puzzle.zoom_toward(mouse_pos, event.y * puzzle_mod.ZOOM_STEP)
+                puzzle.clamp_pan()
+            continue
 
         # Tile Interactions
         if event.type == utils.pygame.MOUSEBUTTONDOWN and event.button == 1:
@@ -112,6 +209,8 @@ def handle_events(puzzle, state, controls, media_controller):
             state.start_pos = None
             if puzzle.is_solved():
                 state.puzzle_solved = True
+
+    return None
 
 def _trigger_next_puzzle(state, media_controller):
     """Queues a move to the next puzzle, using preloaded media when available."""

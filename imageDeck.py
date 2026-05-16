@@ -1,8 +1,28 @@
-import utils
+from dataclasses import dataclass
 import requests
-import tempfile
 import urllib.parse
+import redgifs
+from redgifs.enums import MediaType, Order
+from redgifs.errors import HTTPException
+from redgifs.utils import _read_tags_json
+
 import config
+import utils
+
+
+def _filename_from_url(url, fallback_suffix=".jpg"):
+    """Extract a sanitized filename from a URL, falling back to a random name."""
+    try:
+        raw = urllib.parse.urlparse(url).path
+        name = utils.Path(raw).name
+        # Strip query strings that sneak into the path segment
+        name = name.split("?")[0]
+        if name and "." in name:
+            return name
+    except Exception:
+        pass
+    import uuid
+    return f"{uuid.uuid4().hex}{fallback_suffix}"
 
 class LocalImageDeck:
     def __init__(self, custom_path=None):
@@ -103,14 +123,58 @@ class PexelsImageDeck:
                 print(f"Failed to download image. Status: {response.status_code}")
                 continue
 
-            # Save it to a temporary file with a .jpg extension
-            # so utils.py knows how to load it.
-            tmp = tempfile.NamedTemporaryFile(
-                dir=self.temp_dir,
-                suffix=".jpg",
-                delete=False
-            )
-            tmp.write(response.content)
-            tmp.close()
+            # Save with the original filename so saves are human-readable
+            filename = _filename_from_url(img_url, fallback_suffix=".jpg")
+            dest = self.temp_dir / filename
+            dest.write_bytes(response.content)
+            return dest
 
-            return utils.Path(tmp.name)
+@dataclass(frozen=True)
+class DeckSpec:
+    key: str
+    label: str
+    description: str
+    factory: type
+    supports_search: bool
+
+
+DECK_SPECS = (
+    DeckSpec(
+        "local",
+        "Local Images",
+        "Use files from your local images folder.",
+        LocalImageDeck,
+        False,
+    ),
+    DeckSpec(
+        "pexels",
+        "Pexels",
+        "Pull curated or searched photos from Pexels.",
+        PexelsImageDeck,
+        True,
+    ),
+)
+
+DECK_SPECS_BY_KEY = {spec.key: spec for spec in DECK_SPECS}
+
+
+def get_deck_specs():
+    return DECK_SPECS
+
+
+def get_deck_spec_for_instance(deck):
+    if deck is None:
+        return None
+
+    for spec in DECK_SPECS:
+        if isinstance(deck, spec.factory):
+            return spec
+
+    return None
+
+
+def create_deck(deck_key, query=None):
+    spec = DECK_SPECS_BY_KEY[deck_key]
+    if query:
+        return spec.factory(query=query)
+    return spec.factory()
